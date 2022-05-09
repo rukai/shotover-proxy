@@ -3,8 +3,10 @@ use std::io;
 use crate::transforms::util::ConnectionError;
 
 pub mod cache;
+pub mod cluster;
 pub mod cluster_ports_rewrite;
-pub mod sink_cluster;
+pub mod sink_cluster_handling;
+pub mod sink_cluster_hiding;
 pub mod sink_single;
 pub mod timestamp_tagging;
 

@@ -9,79 +9,49 @@ use crate::transforms::redis::TransformError;
 use crate::transforms::util::cluster_connection_pool::{Authenticator, ConnectionPool};
 use crate::transforms::util::{Request, Response};
 use crate::transforms::ResponseFuture;
+use crate::transforms::Wrapper;
 use crate::transforms::CONTEXT_CHAIN_NAME;
-use crate::transforms::{Transform, Transforms, Wrapper};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use bytes_utils::string::Str;
 use derivative::Derivative;
 use futures::stream::FuturesUnordered;
-use futures::{Future, StreamExt, TryFutureExt};
+use futures::Future;
+use futures::{StreamExt, TryFutureExt};
 use metrics::{counter, register_counter};
-use rand::prelude::SmallRng;
+use rand::rngs::SmallRng;
+use rand::seq::IteratorRandom;
 use rand::SeedableRng;
 use redis_protocol::types::Redirection;
-use serde::Deserialize;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::{BTreeMap, HashSet};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use tokio::time::Duration;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
+
+pub type ChannelMap = HashMap<String, Vec<UnboundedSender<Request>>>;
 
 const SLOT_SIZE: usize = 16384;
 
-type ChannelMap = HashMap<String, Vec<UnboundedSender<Request>>>;
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct RedisSinkClusterConfig {
-    pub first_contact_points: Vec<String>,
-    pub tls: Option<TlsConfig>,
-    connection_count: Option<usize>,
-}
-
-impl RedisSinkClusterConfig {
-    pub async fn get_transform(&self, chain_name: String) -> Result<Transforms> {
-        let mut cluster = RedisSinkCluster::new(
-            self.first_contact_points.clone(),
-            self.connection_count.unwrap_or(1),
-            self.tls.clone(),
-            chain_name,
-        )?;
-
-        match cluster.build_connections(None).await {
-            Ok(()) => {
-                info!("connected to upstream");
-            }
-            Err(TransformError::Upstream(RedisError::NotAuthenticated)) => {
-                info!("upstream requires auth");
-            }
-            Err(e) => {
-                return Err(anyhow!(e).context("failed to connect to upstream"));
-            }
-        }
-
-        Ok(Transforms::RedisSinkCluster(cluster))
-    }
-}
-
 #[derive(Derivative, Clone)]
 #[derivative(Debug)]
-pub struct RedisSinkCluster {
+pub struct ClusterHiding {
     pub slots: SlotMap,
     pub channels: ChannelMap,
-    load_scores: HashMap<(String, usize), usize>,
-    rng: SmallRng,
-    connection_count: usize,
-    connection_pool: ConnectionPool<RedisCodec, RedisAuthenticator, UsernamePasswordToken>,
-    connection_error: Option<&'static str>,
-    rebuild_connections: bool,
-    first_contact_points: Vec<String>,
-    token: Option<UsernamePasswordToken>,
+    pub load_scores: HashMap<(String, usize), usize>,
+    pub rng: SmallRng,
+    pub connection_count: usize,
+    pub connection_pool: ConnectionPool<RedisCodec, RedisAuthenticator, UsernamePasswordToken>,
+    pub connection_error: Option<&'static str>,
+    pub rebuild_connections: bool,
+    pub first_contact_points: Vec<String>,
+    pub token: Option<UsernamePasswordToken>,
 }
 
-impl RedisSinkCluster {
+impl ClusterHiding {
     pub fn new(
         first_contact_points: Vec<String>,
         connection_count: usize,
@@ -92,7 +62,7 @@ impl RedisSinkCluster {
 
         let connection_pool = ConnectionPool::new_with_auth(RedisCodec::new(), authenticator, tls)?;
 
-        let sink_cluster = RedisSinkCluster {
+        let sink_cluster = ClusterHiding {
             slots: SlotMap::new(),
             channels: ChannelMap::new(),
             load_scores: HashMap::new(),
@@ -114,8 +84,79 @@ impl RedisSinkCluster {
         "RedisSinkCluster"
     }
 
+    pub async fn step<'a>(&'a mut self, message_wrapper: Wrapper<'a>) -> ChainResponse {
+        if self.rebuild_connections {
+            self.build_connections(self.token.clone()).await.ok();
+        }
+
+        let mut responses = FuturesOrdered::new();
+
+        for message in message_wrapper.messages {
+            responses.push(match self.dispatch_message(message).await {
+                Ok(response) => response,
+                Err(e) => {
+                    let (one_tx, one_rx) = immediate_responder();
+                    self.send_error_response(one_tx, &format!("ERR {e}"))?;
+                    Box::pin(one_rx)
+                }
+            });
+        }
+
+        trace!("Processing response");
+        let mut response_buffer = vec![];
+
+        while let Some(s) = responses.next().await {
+            trace!("Got resp {:?}", s);
+            let Response { original, response } = s.or_else(|_| -> Result<Response> {
+                Ok(Response {
+                    original: Message::from_frame(Frame::None),
+                    response: Ok(vec![Message::from_frame(Frame::Redis(RedisFrame::Error(
+                        Str::from_inner(Bytes::from_static(b"ERR Could not route request"))
+                            .unwrap(),
+                    )))]),
+                })
+            })?;
+
+            let mut response = response?;
+            assert_eq!(response.len(), 1);
+            let mut response_m = response.remove(0);
+            match response_m.frame() {
+                Some(Frame::Redis(frame)) => {
+                    match frame.to_redirection() {
+                        Some(Redirection::Moved { slot, server }) => {
+                            debug!("Got MOVE {} {}", slot, server);
+
+                            // The destination of a MOVE should always be a master.
+                            self.slots.masters.insert(slot, server.clone());
+
+                            self.rebuild_connections = true;
+
+                            let one_rx = self.choose_and_send(&server, original).await?;
+
+                            responses.prepend(Box::pin(
+                                one_rx.map_err(|e| anyhow!("Error while retrying MOVE - {}", e)),
+                            ));
+                        }
+                        Some(Redirection::Ask { slot, server }) => {
+                            debug!("Got ASK {} {}", slot, server);
+
+                            let one_rx = self.choose_and_send(&server, original).await?;
+
+                            responses.prepend(Box::pin(
+                                one_rx.map_err(|e| anyhow!("Error while retrying ASK - {}", e)),
+                            ));
+                        }
+                        None => response_buffer.push(response_m),
+                    }
+                }
+                _ => response_buffer.push(response_m),
+            }
+        }
+        Ok(response_buffer)
+    }
+
     #[inline]
-    async fn dispatch_message(&mut self, mut message: Message) -> Result<ResponseFuture> {
+    pub async fn dispatch_message(&mut self, mut message: Message) -> Result<ResponseFuture> {
         let command = match message.frame() {
             Some(Frame::Redis(RedisFrame::Array(ref command))) => command,
             None => bail!("Failed to parse redis frame"),
@@ -256,7 +297,7 @@ impl RedisSinkCluster {
         Err(TransformError::choose_upstream_or_first(errors).unwrap())
     }
 
-    async fn build_connections(
+    pub async fn build_connections(
         &mut self,
         token: Option<UsernamePasswordToken>,
     ) -> Result<(), TransformError> {
@@ -320,7 +361,7 @@ impl RedisSinkCluster {
     }
 
     #[inline]
-    async fn choose_and_send(
+    pub async fn choose_and_send(
         &mut self,
         host: &str,
         message: Message,
@@ -423,7 +464,7 @@ impl RedisSinkCluster {
                 self.slots
                     .masters
                     .values()
-                    .next()
+                    .choose(&mut self.rng)
                     .map(|key| vec![key.clone()])
                     .unwrap_or_default(),
             ),
@@ -479,7 +520,11 @@ impl RedisSinkCluster {
     }
 
     #[inline(always)]
-    fn send_error_response(&self, one_tx: oneshot::Sender<Response>, message: &str) -> Result<()> {
+    pub fn send_error_response(
+        &self,
+        one_tx: oneshot::Sender<Response>,
+        message: &str,
+    ) -> Result<()> {
         if let Err(e) = CONTEXT_CHAIN_NAME.try_with(|chain_name| {
         counter!("failed_requests", 1, "chain" => chain_name.to_string(), "transform" => self.get_name());
     }) {
@@ -501,7 +546,7 @@ impl RedisSinkCluster {
     }
 }
 
-#[derive(Clone, Derivative)]
+#[derive(Clone, Derivative, Default)]
 #[derivative(Debug)]
 pub struct SlotMap {
     pub masters: BTreeMap<u16, String>,
@@ -513,7 +558,7 @@ pub struct SlotMap {
 }
 
 impl SlotMap {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             masters: BTreeMap::new(),
             replicas: BTreeMap::new(),
@@ -572,7 +617,7 @@ pub enum Command {
     AUTH,
 }
 
-enum ChannelResult {
+pub enum ChannelResult {
     Channels(Vec<String>),
     Other(Command),
     ShortCircuit(RedisFrame),
@@ -791,7 +836,7 @@ pub fn parse_slots(results: &[RedisFrame]) -> Result<SlotMap> {
     Ok(SlotMap::from_entries(master_entries, replica_entries))
 }
 
-async fn get_topology_from_node(
+pub async fn get_topology_from_node(
     sender: UnboundedSender<Request>,
 ) -> Result<SlotMap, TransformError> {
     let return_chan_rx = send_frame_request(
@@ -829,7 +874,7 @@ fn get_hashtag(key: &[u8]) -> Option<&[u8]> {
 }
 
 #[inline(always)]
-fn send_simple_response(one_tx: oneshot::Sender<Response>, message: &str) -> Result<()> {
+pub fn send_simple_response(one_tx: oneshot::Sender<Response>, message: &str) -> Result<()> {
     send_frame_response(one_tx, RedisFrame::SimpleString(message.to_string().into()))
         .map_err(|_| anyhow!("failed to send simple: {}", message))
 }
@@ -850,7 +895,7 @@ fn send_frame_request(
 }
 
 #[inline(always)]
-async fn receive_frame_response(receiver: oneshot::Receiver<Response>) -> Result<RedisFrame> {
+pub async fn receive_frame_response(receiver: oneshot::Receiver<Response>) -> Result<RedisFrame> {
     let Response { response, .. } = receiver.await?;
 
     // Exactly one Redis response is guaranteed by the codec on success.
@@ -864,7 +909,7 @@ async fn receive_frame_response(receiver: oneshot::Receiver<Response>) -> Result
 }
 
 #[inline(always)]
-fn send_frame_response(
+pub fn send_frame_response(
     one_tx: oneshot::Sender<Response>,
     frame: RedisFrame,
 ) -> Result<(), Response> {
@@ -874,7 +919,7 @@ fn send_frame_response(
     })
 }
 
-fn immediate_responder() -> (
+pub fn immediate_responder() -> (
     oneshot::Sender<Response>,
     impl Future<Output = Result<Response>>,
 ) {
@@ -884,84 +929,6 @@ fn immediate_responder() -> (
             .await
             .map_err(|_| panic!("immediate responder must be used"))
     })
-}
-
-#[async_trait]
-impl Transform for RedisSinkCluster {
-    fn is_terminating(&self) -> bool {
-        true
-    }
-
-    async fn transform<'a>(&'a mut self, message_wrapper: Wrapper<'a>) -> ChainResponse {
-        if self.rebuild_connections {
-            self.build_connections(self.token.clone()).await.ok();
-        }
-
-        let mut responses = FuturesOrdered::new();
-
-        for message in message_wrapper.messages {
-            responses.push(match self.dispatch_message(message).await {
-                Ok(response) => response,
-                Err(e) => {
-                    let (one_tx, one_rx) = immediate_responder();
-                    self.send_error_response(one_tx, &format!("ERR {e}"))?;
-                    Box::pin(one_rx)
-                }
-            });
-        }
-
-        trace!("Processing response");
-        let mut response_buffer = vec![];
-
-        while let Some(s) = responses.next().await {
-            trace!("Got resp {:?}", s);
-            let Response { original, response } = s.or_else(|_| -> Result<Response> {
-                Ok(Response {
-                    original: Message::from_frame(Frame::None),
-                    response: Ok(vec![Message::from_frame(Frame::Redis(RedisFrame::Error(
-                        Str::from_inner(Bytes::from_static(b"ERR Could not route request"))
-                            .unwrap(),
-                    )))]),
-                })
-            })?;
-
-            let mut response = response?;
-            assert_eq!(response.len(), 1);
-            let mut response_m = response.remove(0);
-            match response_m.frame() {
-                Some(Frame::Redis(frame)) => {
-                    match frame.to_redirection() {
-                        Some(Redirection::Moved { slot, server }) => {
-                            debug!("Got MOVE {} {}", slot, server);
-
-                            // The destination of a MOVE should always be a master.
-                            self.slots.masters.insert(slot, server.clone());
-
-                            self.rebuild_connections = true;
-
-                            let one_rx = self.choose_and_send(&server, original).await?;
-
-                            responses.prepend(Box::pin(
-                                one_rx.map_err(|e| anyhow!("Error while retrying MOVE - {}", e)),
-                            ));
-                        }
-                        Some(Redirection::Ask { slot, server }) => {
-                            debug!("Got ASK {} {}", slot, server);
-
-                            let one_rx = self.choose_and_send(&server, original).await?;
-
-                            responses.prepend(Box::pin(
-                                one_rx.map_err(|e| anyhow!("Error while retrying ASK - {}", e)),
-                            ));
-                        }
-                        None => response_buffer.push(response_m),
-                    }
-                }
-                _ => response_buffer.push(response_m),
-            }
-        }
-        Ok(response_buffer)
-    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Derivative)]
@@ -975,7 +942,7 @@ pub struct UsernamePasswordToken {
 }
 
 #[derive(Clone)]
-struct RedisAuthenticator {}
+pub struct RedisAuthenticator {}
 
 #[async_trait]
 impl Authenticator<UsernamePasswordToken> for RedisAuthenticator {
@@ -1012,9 +979,11 @@ impl Authenticator<UsernamePasswordToken> for RedisAuthenticator {
         }
     }
 }
+
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::codec::redis::RedisCodec;
     use tokio_util::codec::Decoder;
 
     #[test]

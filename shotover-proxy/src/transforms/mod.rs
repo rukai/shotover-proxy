@@ -29,7 +29,12 @@ use crate::transforms::redis::cache::{RedisConfig, SimpleRedisCache};
 use crate::transforms::redis::cluster_ports_rewrite::{
     RedisClusterPortsRewrite, RedisClusterPortsRewriteConfig,
 };
-use crate::transforms::redis::sink_cluster::{RedisSinkCluster, RedisSinkClusterConfig};
+use crate::transforms::redis::sink_cluster_handling::{
+    RedisSinkClusterHandling, RedisSinkClusterHandlingConfig,
+};
+use crate::transforms::redis::sink_cluster_hiding::{
+    RedisSinkClusterHiding, RedisSinkClusterHidingConfig,
+};
 use crate::transforms::redis::sink_single::{RedisSinkSingle, RedisSinkSingleConfig};
 use crate::transforms::redis::timestamp_tagging::RedisTimestampTagger;
 use crate::transforms::tee::{Tee, TeeConfig};
@@ -84,7 +89,8 @@ pub enum Transforms {
     Protect(Protect),
     ConsistentScatter(ConsistentScatter),
     RedisTimestampTagger(RedisTimestampTagger),
-    RedisSinkCluster(RedisSinkCluster),
+    RedisSinkClusterHiding(RedisSinkClusterHiding),
+    RedisSinkClusterHandling(RedisSinkClusterHandling),
     RedisClusterPortsRewrite(RedisClusterPortsRewrite),
     DebugReturner(DebugReturner),
     DebugRandomDelay(DebugRandomDelay),
@@ -123,7 +129,8 @@ impl Transforms {
             Transforms::RedisSinkSingle(r) => r.transform(message_wrapper).await,
             Transforms::RedisTimestampTagger(r) => r.transform(message_wrapper).await,
             Transforms::RedisClusterPortsRewrite(r) => r.transform(message_wrapper).await,
-            Transforms::RedisSinkCluster(r) => r.transform(message_wrapper).await,
+            Transforms::RedisSinkClusterHiding(r) => r.transform(message_wrapper).await,
+            Transforms::RedisSinkClusterHandling(r) => r.transform(message_wrapper).await,
             Transforms::ParallelMap(s) => s.transform(message_wrapper).await,
             Transforms::PoolConnections(s) => s.transform(message_wrapper).await,
             Transforms::Coalesce(s) => s.transform(message_wrapper).await,
@@ -154,7 +161,8 @@ impl Transforms {
             Transforms::DebugReturner(a) => a.prep_transform_chain(t).await,
             Transforms::DebugRandomDelay(a) => a.prep_transform_chain(t).await,
             Transforms::RedisTimestampTagger(a) => a.prep_transform_chain(t).await,
-            Transforms::RedisSinkCluster(r) => r.prep_transform_chain(t).await,
+            Transforms::RedisSinkClusterHandling(r) => r.prep_transform_chain(t).await,
+            Transforms::RedisSinkClusterHiding(r) => r.prep_transform_chain(t).await,
             Transforms::RedisClusterPortsRewrite(r) => r.prep_transform_chain(t).await,
             Transforms::ParallelMap(s) => s.prep_transform_chain(t).await,
             Transforms::PoolConnections(s) => s.prep_transform_chain(t).await,
@@ -178,7 +186,8 @@ impl Transforms {
             Transforms::DebugPrinter(p) => p.validate(),
             Transforms::DebugForceParse(p) => p.validate(),
             Transforms::Null(n) => n.validate(),
-            Transforms::RedisSinkCluster(r) => r.validate(),
+            Transforms::RedisSinkClusterHandling(r) => r.validate(),
+            Transforms::RedisSinkClusterHiding(r) => r.validate(),
             Transforms::ParallelMap(s) => s.validate(),
             Transforms::PoolConnections(s) => s.validate(),
             Transforms::Coalesce(s) => s.validate(),
@@ -206,7 +215,8 @@ impl Transforms {
             Transforms::DebugPrinter(p) => p.is_terminating(),
             Transforms::DebugForceParse(p) => p.is_terminating(),
             Transforms::Null(n) => n.is_terminating(),
-            Transforms::RedisSinkCluster(r) => r.is_terminating(),
+            Transforms::RedisSinkClusterHandling(r) => r.is_terminating(),
+            Transforms::RedisSinkClusterHiding(r) => r.is_terminating(),
             Transforms::ParallelMap(s) => s.is_terminating(),
             Transforms::PoolConnections(s) => s.is_terminating(),
             Transforms::Coalesce(s) => s.is_terminating(),
@@ -232,7 +242,8 @@ pub enum TransformsConfig {
     RedisCache(RedisConfig),
     Tee(TeeConfig),
     ConsistentScatter(ConsistentScatterConfig),
-    RedisSinkCluster(RedisSinkClusterConfig),
+    RedisSinkClusterHiding(RedisSinkClusterHidingConfig),
+    RedisSinkClusterHandling(RedisSinkClusterHandlingConfig),
     RedisClusterPortsRewrite(RedisClusterPortsRewriteConfig),
     RedisTimestampTagger,
     DebugPrinter,
@@ -280,7 +291,8 @@ impl TransformsConfig {
             TransformsConfig::Protect(p) => p.get_transform().await,
             #[cfg(feature = "alpha-transforms")]
             TransformsConfig::DebugForceParse(d) => d.get_transform().await,
-            TransformsConfig::RedisSinkCluster(r) => r.get_transform(chain_name).await,
+            TransformsConfig::RedisSinkClusterHiding(r) => r.get_transform(chain_name).await,
+            TransformsConfig::RedisSinkClusterHandling(r) => r.get_transform(chain_name).await,
             TransformsConfig::ParallelMap(s) => s.get_transform(topics).await,
             //TransformsConfig::PoolConnections(s) => s.get_transform(topics).await,
             TransformsConfig::Coalesce(s) => s.get_transform().await,

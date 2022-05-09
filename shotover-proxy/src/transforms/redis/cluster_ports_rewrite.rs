@@ -231,7 +231,7 @@ fn is_cluster_slots(frame: &Frame) -> bool {
 mod test {
     use super::*;
     use crate::codec::redis::RedisCodec;
-    use crate::transforms::redis::sink_cluster::parse_slots;
+    use crate::transforms::redis::cluster::parse_slots;
     use tokio_util::codec::Decoder;
 
     #[test]
