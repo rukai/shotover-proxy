@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use openssl::ssl::Ssl;
+use openssl::ssl::{Ssl, SslVerifyMode};
 use openssl::ssl::{SslAcceptor, SslConnector, SslFiletype, SslMethod};
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
@@ -101,7 +101,9 @@ impl TlsConnector {
     }
 
     pub async fn connect(&self, tcp_stream: TcpStream) -> Result<SslStream<TcpStream>> {
-        let ssl = self.connector.configure()?.into_ssl("localhost")?;
+        let mut ssl = self.connector.configure()?.verify_hostname(false);
+        ssl.set_verify(SslVerifyMode::NONE);
+        let ssl = ssl.into_ssl("localhost")?;
 
         let mut ssl_stream = SslStream::new(ssl, tcp_stream)?;
         Pin::new(&mut ssl_stream)
