@@ -280,42 +280,7 @@ impl Encoder<Messages> for CassandraEncoder {
     ) -> std::result::Result<(), Self::Error> {
         for m in item {
             let start = dst.len();
-            let compression = m.codec_state.as_cassandra();
-
-            // TODO: always check if cassandra message
-            match m.into_encodable(MessageType::Cassandra)? {
-                Encodable::Bytes(bytes) => {
-                    // check if the message is a startup message and set the codec's compression
-                    {
-                        let opcode = Opcode::try_from(bytes[4])?;
-                        if Opcode::Startup == opcode {
-                            if let CassandraFrame {
-                                operation: CassandraOperation::Startup(startup),
-                                ..
-                            } = CassandraFrame::from_bytes(bytes.clone(), Compression::None)?
-                            {
-                                set_compression(&mut self.compression, &startup);
-                            };
-                        }
-                    }
-
-                    dst.extend_from_slice(&bytes)
-                }
-                Encodable::Frame(frame) => {
-                    // check if the message is a startup message and set the codec's compression
-                    if let Frame::Cassandra(CassandraFrame {
-                        operation: CassandraOperation::Startup(startup),
-                        ..
-                    }) = &frame
-                    {
-                        set_compression(&mut self.compression, startup);
-                    };
-
-                    let buffer = frame.into_cassandra().unwrap().encode(compression);
-
-                    dst.put(buffer.as_slice());
-                }
-            }
+            encode_frame(dst, m, &mut self.compression, self.version)?;
             tracing::debug!(
                 "{}: outgoing cassandra message:\n{}",
                 self.direction,
@@ -324,6 +289,68 @@ impl Encoder<Messages> for CassandraEncoder {
         }
         Ok(())
     }
+}
+
+fn encode_frame(
+    dst: &mut BytesMut,
+    m: Message,
+    codec_compression: &mut Arc<RwLock<Compression>>,
+    version: Version,
+) -> Result<()> {
+    match version {
+        Version::V5 => {
+            // TODO: write envelope header with dummy values for those we cant calculate till after we write the message
+
+            encode_envelope(dst, m, codec_compression)?;
+
+            // TODO: measure length of message and calculate crc24 and overwrite frame header values
+            Ok(())
+        }
+        _ => encode_envelope(dst, m, codec_compression),
+    }
+}
+
+fn encode_envelope(
+    dst: &mut BytesMut,
+    m: Message,
+    codec_compression: &mut Arc<RwLock<Compression>>,
+) -> Result<()> {
+    let message_compression = m.codec_state.as_cassandra();
+    // TODO: always check if cassandra message
+    match m.into_encodable(MessageType::Cassandra)? {
+        Encodable::Bytes(bytes) => {
+            // check if the message is a startup message and set the codec's compression
+            {
+                let opcode = Opcode::try_from(bytes[4])?;
+                if Opcode::Startup == opcode {
+                    if let CassandraFrame {
+                        operation: CassandraOperation::Startup(startup),
+                        ..
+                    } = CassandraFrame::from_bytes(bytes.clone(), Compression::None)?
+                    {
+                        set_compression(codec_compression, &startup);
+                    };
+                }
+            }
+
+            dst.extend_from_slice(&bytes)
+        }
+        Encodable::Frame(frame) => {
+            // check if the message is a startup message and set the codec's compression
+            if let Frame::Cassandra(CassandraFrame {
+                operation: CassandraOperation::Startup(startup),
+                ..
+            }) = &frame
+            {
+                set_compression(codec_compression, startup);
+            };
+
+            let buffer = frame.into_cassandra().unwrap().encode(message_compression);
+
+            dst.put(buffer.as_slice());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
