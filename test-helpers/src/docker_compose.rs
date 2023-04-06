@@ -135,7 +135,7 @@ impl DockerCompose {
     fn wait_for_containers_to_startup(service_to_image: HashMap<String, String>, file_path: &str) {
         let images = [
             Image {
-                name: "shotover/shotover-proxy",
+                name: "shotover/shotover-proxy:v0.1.9",
                 log_regex_to_wait_for: r"accepting inbound connections",
             },
             Image {
