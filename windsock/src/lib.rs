@@ -62,6 +62,8 @@ impl Windsock {
             tables::compare_by_name(compare_by_name)?;
         } else if let Some(compare_by_name) = &args.results_by_name {
             tables::results_by_name(compare_by_name)?;
+        } else if args.results_all {
+            tables::results_all()?;
         } else if let Some(compare_by_tags) = &args.compare_by_tags {
             tables::compare_by_tags(compare_by_tags)?;
         } else if let Some(results_by_tags) = &args.results_by_tags {

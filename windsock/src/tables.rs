@@ -8,6 +8,15 @@ use console::{pad_str, pad_str_with, style, Alignment};
 use std::{collections::HashSet, time::Duration};
 use strum::IntoEnumIterator;
 
+pub fn results_all() -> Result<()> {
+    let archives: Result<Vec<ReportArchive>> = ReportArchive::reports_in_last_run()
+        .iter()
+        .map(|x| ReportArchive::load(x))
+        .collect();
+    display_results_table(&archives?);
+    Ok(())
+}
+
 pub fn compare_by_name(names: &str) -> Result<()> {
     let archives: Result<Vec<ReportArchive>> =
         names.split_whitespace().map(ReportArchive::load).collect();

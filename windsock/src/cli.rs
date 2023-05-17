@@ -41,6 +41,11 @@ pub struct Args {
     #[clap(long)]
     pub compare_by_tags: Option<String>,
 
+    /// Display all results from the last benchmark run
+    /// --results-all
+    #[clap(long)]
+    pub results_all: bool,
+
     /// Display results from the last benchmark run by, comparing benches with specified bench names
     /// --results-by-name "name1 name2 name3"
     #[clap(long)]
