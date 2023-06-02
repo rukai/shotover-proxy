@@ -8,6 +8,7 @@ use crate::transforms::util::{Request, Response};
 use crate::transforms::{Transform, TransformBuilder, Transforms, Wrapper};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+
 use serde::Deserialize;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
@@ -138,6 +139,23 @@ impl Transform for KafkaSinkSingle {
                 } else {
                     false
                 };
+                if let Some(Frame::Kafka(KafkaFrame::Request {
+                    body: RequestBody::Produce(produce),
+                    ..
+                })) = message.frame()
+                {
+                    for d in &produce.topic_data {
+                        for p in &d.1.partition_data {
+                            let bytes = p.records.as_ref().unwrap();
+                            tracing::info!("{}", pretty_hex::pretty_hex(&bytes));
+                            for record in
+                                super::record_iterator::RecordIterator::new(&mut bytes.clone())?
+                            {
+                                tracing::info!("record: {}", pretty_hex::pretty_hex(&record));
+                            }
+                        }
+                    }
+                }
 
                 let (tx, rx) = oneshot::channel();
                 let return_chan = if acks0 {

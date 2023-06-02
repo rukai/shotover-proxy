@@ -3304,6 +3304,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "hyper",
+ "integer-encoding",
  "itertools",
  "kafka-protocol",
  "lz4_flex 0.10.0",
