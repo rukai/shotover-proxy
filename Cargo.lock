@@ -569,8 +569,7 @@ dependencies = [
 [[package]]
 name = "aws-throwaway"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ae7c585d17af2f92f38daf7c01969dfdf9be19257e4c2eb097aec71b21c4c5c"
+source = "git+https://github.com/rukai/aws-throwaway?branch=check_fingerprint#cfe997aff13782cc46e80c67fbea4b8499b8453b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1665,6 +1664,7 @@ name = "ec2-cargo"
 version = "0.1.0"
 dependencies = [
  "aws-throwaway",
+ "cargo_metadata",
  "clap",
  "rustyline",
  "shellfish",
