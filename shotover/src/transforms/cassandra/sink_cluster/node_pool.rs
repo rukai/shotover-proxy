@@ -207,6 +207,7 @@ impl NodePool {
             )
             .collect::<Vec<uuid::Uuid>>();
 
+        let full_nodes = format!("{:#?}", self.nodes);
         let mut nodes: Vec<&mut CassandraNode> = self
             .nodes
             .iter_mut()
@@ -228,6 +229,9 @@ impl NodePool {
             // The client correctly routes to the shotover node that reports it has the token in its rack, however the destination cassandra node has since gone down and is now inaccessible.
             // or
             // The clients token aware routing is broken.
+            tracing::warn!(
+                "rack: {rack:?} replica_host_ids: {replica_host_ids:?}\nfull_nodes:{full_nodes}",
+            );
             self.out_of_rack_requests.increment(1);
         }
 
