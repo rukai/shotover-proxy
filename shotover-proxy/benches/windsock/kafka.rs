@@ -19,7 +19,7 @@ use test_helpers::docker_compose::docker_compose;
 use test_helpers::rdkafka::config::ClientConfig;
 use test_helpers::rdkafka::consumer::{Consumer, StreamConsumer};
 use test_helpers::rdkafka::producer::{FutureProducer, FutureRecord};
-use test_helpers::rdkafka::util::Timeout;
+use test_helpers::rdkafka::types::RDKafkaErrorCode;
 use tokio::{sync::mpsc::UnboundedSender, task::JoinHandle, time::Instant};
 use windsock::{Bench, BenchParameters, Profiling, Report};
 
@@ -190,6 +190,7 @@ impl KafkaBench {
 #[async_trait]
 impl Bench for KafkaBench {
     fn cores_required(&self) -> usize {
+        // I believe librdkafka will generate additional threads but I have no idea how many
         2
     }
 
@@ -361,7 +362,7 @@ impl Bench for KafkaBench {
         let producer = BenchTaskProducerKafka { producer, message };
 
         // ensure topic exists
-        producer.produce_one().await.unwrap();
+        producer.produce_one().await.1.unwrap();
 
         let consumer: StreamConsumer = ClientConfig::new()
             .set("bootstrap.servers", broker_address)
@@ -411,18 +412,83 @@ struct BenchTaskProducerKafka {
 
 #[async_trait]
 impl BenchTaskProducer for BenchTaskProducerKafka {
-    async fn produce_one(&self) -> Result<(), String> {
-        self.producer
-            .send(
+    async fn produce_one(&self) -> (Duration, Result<(), String>) {
+        let mut instant = Instant::now();
+        let result = loop {
+            match self.producer.send_result(
                 FutureRecord::to("topic_foo")
                     .payload(&self.message)
                     .key("Key"),
-                Timeout::Never,
-            )
-            .await
-            // Take just the error, ignoring the message contents because large messages result in unreadable noise in the logs.
-            .map_err(|e| format!("{:?}", e.0))
-            .map(|_| ())
+            ) {
+                Ok(ok) => {
+                    break ok
+                        .await
+                        .unwrap()
+                        // Take just the error, ignoring the message contents because large messages result in unreadable noise in the logs.
+                        .map_err(|e| format!("{:?}", e.0))
+                        .map(|_| ());
+                }
+                Err((err, _)) if err.rdkafka_error_code() == Some(RDKafkaErrorCode::QueueFull) => {
+                    tokio::task::yield_now().await;
+                    instant = Instant::now();
+                    continue;
+                }
+                Err((err, _)) => break Err(format!("{err:?}")),
+            }
+        };
+        (instant.elapsed(), result)
+    }
+}
+
+#[async_trait]
+pub trait BenchTaskProducer: Clone + Send + Sync + 'static {
+    async fn produce_one(&self) -> (Duration, Result<(), String>);
+
+    async fn spawn_tasks(
+        self,
+        reporter: UnboundedSender<Report>,
+        operations_per_second: Option<u64>,
+    ) -> Vec<JoinHandle<()>> {
+        let mut tasks = vec![];
+        // 10000 is a generally nice amount of tasks to have, but if we have more tasks than OPS the throughput is very unstable
+        let task_count = operations_per_second.map(|x| x.min(10000)).unwrap_or(10000);
+
+        let allocated_time_per_op = operations_per_second
+            .map(|ops| (Duration::from_secs(1) * task_count as u32) / ops as u32);
+        for _ in 0..task_count {
+            let task = self.clone();
+            let reporter = reporter.clone();
+            tasks.push(tokio::spawn(async move {
+                let mut interval = allocated_time_per_op.map(tokio::time::interval);
+
+                loop {
+                    if let Some(interval) = &mut interval {
+                        interval.tick().await;
+                    }
+
+                    tokio::select!(
+                        (operation_length, result) = task.produce_one() => {
+                            let report = match result {
+                                Ok(()) => Report::ProduceCompletedIn(operation_length),
+                                Err(message) => Report::ProduceErrored {
+                                    completed_in: operation_length,
+                                    message,
+                                },
+                            };
+                            if reporter.send(report).is_err() {
+                                // Errors indicate the reporter has closed so we should end the bench
+                                return;
+                            }
+                        }
+                        _ = reporter.closed() => {
+                            return
+                        }
+                    );
+                }
+            }));
+        }
+
+        tasks
     }
 }
 
@@ -459,57 +525,4 @@ fn spawn_consumer_tasks(
             })
         })
         .collect()
-}
-
-#[async_trait]
-pub trait BenchTaskProducer: Clone + Send + Sync + 'static {
-    async fn produce_one(&self) -> Result<(), String>;
-
-    async fn spawn_tasks(
-        self,
-        reporter: UnboundedSender<Report>,
-        operations_per_second: Option<u64>,
-    ) -> Vec<JoinHandle<()>> {
-        let mut tasks = vec![];
-        // 10000 is a generally nice amount of tasks to have, but if we have more tasks than OPS the throughput is very unstable
-        let task_count = operations_per_second.map(|x| x.min(10000)).unwrap_or(10000);
-
-        let allocated_time_per_op = operations_per_second
-            .map(|ops| (Duration::from_secs(1) * task_count as u32) / ops as u32);
-        for _ in 0..task_count {
-            let task = self.clone();
-            let reporter = reporter.clone();
-            tasks.push(tokio::spawn(async move {
-                let mut interval = allocated_time_per_op.map(tokio::time::interval);
-
-                loop {
-                    if let Some(interval) = &mut interval {
-                        interval.tick().await;
-                    }
-
-                    let operation_start = Instant::now();
-                    tokio::select!(
-                        result = task.produce_one() => {
-                            let report = match result {
-                                Ok(()) => Report::ProduceCompletedIn(operation_start.elapsed()),
-                                Err(message) => Report::ProduceErrored {
-                                    completed_in: operation_start.elapsed(),
-                                    message,
-                                },
-                            };
-                            if reporter.send(report).is_err() {
-                                // Errors indicate the reporter has closed so we should end the bench
-                                return;
-                            }
-                        }
-                        _ = reporter.closed() => {
-                            return
-                        }
-                    );
-                }
-            }));
-        }
-
-        tasks
-    }
 }
