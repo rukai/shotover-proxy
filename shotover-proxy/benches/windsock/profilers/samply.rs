@@ -54,6 +54,8 @@ impl Samply {
 async fn run_command(command: &str, args: &[&str]) -> String {
     let output = tokio::process::Command::new(command)
         .args(args)
+        // TODO: needed with split-debuginfo to find the *.dwp file
+        .current_dir("/home/rukai2/RustBuilds/shotover/target/release")
         .output()
         .await
         .unwrap();

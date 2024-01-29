@@ -13,17 +13,11 @@ resolver = "2"
 # https://deterministic.space/high-performance-rust.html
 [profile.release]
 lto = "fat"
-codegen-units = 1
-
-[profile.bench]
-lto = "fat"
-codegen-units = 1
-
-# used for e.g. generating flamegraphs
-[profile.profiling]
-inherits = "release"
-lto = false
 debug = true
+# This still leaves a 40MB shotover executable which is unacceptable!
+#https://github.com/rust-lang/rust/issues/105991
+
+split-debuginfo = "packed"
 codegen-units = 1
 
 [workspace.dependencies]

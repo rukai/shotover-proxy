@@ -660,7 +660,6 @@ impl Bench for CassandraBench {
                 Some(
                     ShotoverProcessBuilder::new_with_topology(topology_path.to_str().unwrap())
                         .with_bin(bin_path!("shotover-proxy"))
-                        .with_profile(profiler.shotover_profile())
                         .with_cores(core_count.shotover as u32)
                         .start()
                         .await,

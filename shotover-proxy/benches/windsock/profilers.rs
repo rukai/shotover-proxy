@@ -69,14 +69,6 @@ impl ProfilerRunner {
             None
         };
     }
-
-    pub fn shotover_profile(&self) -> Option<&'static str> {
-        if self.run_samply {
-            Some("profiling")
-        } else {
-            None
-        }
-    }
 }
 
 impl Drop for ProfilerRunner {

@@ -371,7 +371,7 @@ impl Bench for KafkaBench {
             Shotover::Standard | Shotover::ForcedMessageParsed => {
                 let topology_yaml = self
                     .generate_topology_yaml("127.0.0.1:9092".to_owned(), kafka_address.to_owned());
-                Some(shotover_process_custom_topology(&topology_yaml, &profiler).await)
+                Some(shotover_process_custom_topology(&topology_yaml).await)
             }
             Shotover::None => None,
         };
