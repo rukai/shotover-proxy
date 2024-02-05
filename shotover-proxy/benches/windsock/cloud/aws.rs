@@ -1,7 +1,7 @@
 use anyhow::Result;
 use aws_throwaway::{Aws, Ec2Instance, InstanceType};
 use aws_throwaway::{CleanupResources, Ec2InstanceDefinition};
-use regex::Regex;
+use regex_lite::Regex;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use std::time::Duration;

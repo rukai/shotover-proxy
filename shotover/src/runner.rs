@@ -237,6 +237,9 @@ impl TracingState {
                 let builder = tracing_subscriber::fmt()
                     .json()
                     .with_writer(non_blocking)
+                    // TODO: in theory we can use `Targets` here https://docs.rs/tracing-subscriber/0.3.18/tracing_subscriber/filter/targets/struct.Targets.html
+                    // Possibly we need to expand the tracing API first though.
+                    // BUT First of all we should just comment out the usage of tracing_subscriber and check compiletime/binarysize of `cargo build --release --features kafka`
                     .with_env_filter(env_filter)
                     .with_filter_reloading();
                 let handle = ReloadHandle::Json(builder.reload_handle());
