@@ -205,7 +205,9 @@ async fn register_for_topology_and_status_events(
             }),
         })))
         .unwrap()
-        .await??;
+        .await??
+        .pop()
+        .unwrap();
 
     if let Some(Frame::Cassandra(CassandraFrame { operation, .. })) = response.frame() {
         match operation {
@@ -259,7 +261,9 @@ mod system_keyspaces {
                     params: Box::default(),
                 },
             })))?
-            .await??;
+            .await??
+            .pop()
+            .unwrap();
         into_keyspaces(response, data_center)
     }
 
@@ -388,7 +392,9 @@ mod system_local {
                     params: Box::default(),
                 },
             })))?
-            .await??;
+            .await??
+            .pop()
+            .unwrap();
 
         into_nodes(response, data_center, address)
     }
@@ -474,7 +480,9 @@ mod system_peers {
                 },
             }),
         ),
-        )?.await??;
+        )?.await??
+        .pop()
+        .unwrap();
 
         if is_peers_v2_does_not_exist_error(&mut response) {
             response = connection
@@ -490,7 +498,9 @@ mod system_peers {
                         params: Box::default(),
                     },
                 })))?
-                .await??;
+                .await??
+                .pop()
+                .unwrap();
         }
 
         into_nodes(response, data_center)

@@ -155,14 +155,9 @@ impl CassandraSinkSingle {
 
         super::connection::receive(self.read_timeout, &self.failed_requests, responses_future?)
             .await
-            .map(|responses| {
-                responses
-                    .into_iter()
-                    .map(|response| match response {
-                        Ok(response) => response,
-                        Err(error) => error.to_response(self.version.unwrap()),
-                    })
-                    .collect()
+            .map(|responses| match responses {
+                Ok(response) => response,
+                Err(error) => error.to_responses(self.version.unwrap()),
             })
     }
 }

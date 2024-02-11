@@ -440,7 +440,7 @@ impl CassandraSinkCluster {
                         // send an unprepared error in response to force
                         // the client to reprepare the query
                         return_chan_tx
-                            .send(Ok(Message::from_frame(Frame::Cassandra(
+                            .send(Ok(vec!(Message::from_frame(Frame::Cassandra(
                                 CassandraFrame {
                                     operation: CassandraOperation::Error(ErrorBody {
                                         message: "Shotover does not have this query's metadata. Please re-prepare on this Shotover host before sending again.".into(),
@@ -451,7 +451,7 @@ impl CassandraSinkCluster {
                                     version: self.version.unwrap(),
                                     warnings: vec![],
                                 },
-                            ),
+                            ))
                         ))).expect("the receiver is guaranteed to be alive, so this must succeed");
                         return_chan_rx
                     }
@@ -484,16 +484,13 @@ impl CassandraSinkCluster {
         let response_results =
             super::connection::receive(self.read_timeout, &self.failed_requests, responses_future)
                 .await?;
-        let mut responses = vec![];
-        for response in response_results {
-            match response {
-                Ok(response) => responses.push(response),
-                Err(error) => {
-                    self.pool.report_issue_with_node(error.destination);
-                    responses.push(error.to_response(self.version.unwrap()));
-                }
+        let mut responses = match response_results {
+            Ok(responses) => responses,
+            Err(error) => {
+                self.pool.report_issue_with_node(error.destination);
+                error.to_responses(self.version.unwrap())
             }
-        }
+        };
 
         // When the server indicates that it is ready for normal operation via Ready or AuthSuccess,
         // we have succesfully collected an entire handshake so we mark the handshake as complete.
@@ -590,11 +587,11 @@ impl CassandraSinkCluster {
 fn send_error_in_response_to_metadata(
     metadata: &CassandraMetadata,
     error: &str,
-) -> oneshot::Receiver<Result<Message, ResponseError>> {
+) -> oneshot::Receiver<Result<Messages, ResponseError>> {
     let (tx, rx) = oneshot::channel();
-    tx.send(Ok(Message::from_frame(Frame::Cassandra(
+    tx.send(Ok(vec![Message::from_frame(Frame::Cassandra(
         CassandraFrame::shotover_error(metadata.stream_id, metadata.version, error),
-    ))))
+    ))]))
     .unwrap();
     rx
 }
@@ -602,7 +599,7 @@ fn send_error_in_response_to_metadata(
 fn send_error_in_response_to_message(
     message: &Message,
     error: &str,
-) -> Result<oneshot::Receiver<Result<Message, ResponseError>>> {
+) -> Result<oneshot::Receiver<Result<Messages, ResponseError>>> {
     if let Ok(Metadata::Cassandra(metadata)) = message.metadata() {
         Ok(send_error_in_response_to_metadata(&metadata, error))
     } else {
@@ -708,7 +705,7 @@ fn is_use_statement_successful(response: Option<Result<Response>>) -> bool {
         if let Some(Frame::Cassandra(CassandraFrame {
             operation: CassandraOperation::Result(CassandraResult::SetKeyspace(_)),
             ..
-        })) = response.frame()
+        })) = response.pop().unwrap().frame()
         {
             return true;
         }

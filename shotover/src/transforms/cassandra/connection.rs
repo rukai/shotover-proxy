@@ -23,12 +23,11 @@ use tracing::Instrument;
 
 #[derive(Debug)]
 struct Request {
-    message: Message,
+    messages: Vec<Message>,
     return_chan: oneshot::Sender<Response>,
-    stream_id: i16,
 }
 
-pub type Response = Result<Message, ResponseError>;
+pub type Response = Result<Messages, ResponseError>;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Connection to destination cassandra node {destination} was closed: {cause:?}")]
@@ -36,23 +35,29 @@ pub struct ResponseError {
     #[source]
     pub cause: anyhow::Error,
     pub destination: SocketAddr,
-    pub stream_id: i16,
+    pub stream_ids: Vec<i16>,
 }
 
 impl ResponseError {
-    pub fn to_response(&self, version: Version) -> Message {
-        Message::from_frame(Frame::Cassandra(CassandraFrame::shotover_error(
-            self.stream_id,
-            version,
-            &format!("{}", self),
-        )))
+    pub fn to_responses(&self, version: Version) -> Messages {
+        self.stream_ids
+            .iter()
+            .map(|stream_id| {
+                Message::from_frame(Frame::Cassandra(CassandraFrame::shotover_error(
+                    *stream_id,
+                    version,
+                    &format!("{}", self),
+                )))
+            })
+            .collect()
     }
 }
 
 #[derive(Debug)]
 struct ReturnChannel {
     return_chan: oneshot::Sender<Response>,
-    stream_id: i16,
+    /// Defines the order the messages must be reassembled into
+    stream_ids: Vec<i16>,
 }
 
 #[derive(Clone, Derivative)]
@@ -145,21 +150,20 @@ impl CassandraConnection {
     ///
     /// If an internal invariant is broken the internal tasks may panic and external invariants will no longer be upheld.
     /// But this indicates a bug within CassandraConnection and should be fixed here.
-    pub fn send(&self, message: Message) -> Result<oneshot::Receiver<Response>> {
+    pub fn send_batch(&self, messages: Vec<Message>) -> Result<oneshot::Receiver<Response>> {
         let (return_chan_tx, return_chan_rx) = oneshot::channel();
         // Convert the message to `Request` and send upstream
-        if let Some(stream_id) = message.stream_id() {
-            self.connection
-                .send(Request {
-                    message,
-                    return_chan: return_chan_tx,
-                    stream_id,
-                })
-                .map(|_| return_chan_rx)
-                .map_err(|x| x.into())
-        } else {
-            Err(anyhow!("no cassandra frame found"))
-        }
+        self.connection
+            .send(Request {
+                messages,
+                return_chan: return_chan_tx,
+            })
+            .map(|_| return_chan_rx)
+            .map_err(|x| x.into())
+    }
+
+    pub fn send(&self, message: Message) -> Result<oneshot::Receiver<Response>> {
+        self.send_batch(vec![message])
     }
 }
 
@@ -185,22 +189,27 @@ async fn tx_process<T: AsyncWrite>(
     let mut connection_dead_error: Option<String> = None;
     loop {
         if let Some(request) = out_rx.recv().await {
+            let stream_ids: Vec<i16> = request
+                .messages
+                .iter()
+                .map(|x| x.stream_id().unwrap())
+                .collect();
             if let Some(error) = &connection_dead_error {
-                send_error_to_request(request.return_chan, request.stream_id, destination, error);
-            } else if let Err(error) = in_w.send(vec![request.message]).await {
+                send_error_to_request(request.return_chan, stream_ids, destination, error);
+            } else if let Err(error) = in_w.send(request.messages).await {
                 let error = format!("{:?}", error);
-                send_error_to_request(request.return_chan, request.stream_id, destination, &error);
+                send_error_to_request(request.return_chan, stream_ids, destination, &error);
                 connection_dead_error = Some(error.clone());
             } else if let Err(mpsc::error::SendError(return_chan)) = return_tx.send(ReturnChannel {
                 return_chan: request.return_chan,
-                stream_id: request.stream_id,
+                stream_ids,
             }) {
                 let error = rx_process_has_shutdown_rx
                     .try_recv()
                     .expect("Rx task must send this before closing return_tx");
                 send_error_to_request(
                     return_chan.return_chan,
-                    return_chan.stream_id,
+                    return_chan.stream_ids,
                     destination,
                     &error,
                 );
@@ -232,7 +241,7 @@ async fn tx_process<T: AsyncWrite>(
 
 fn send_error_to_request(
     return_chan: oneshot::Sender<Response>,
-    stream_id: i16,
+    stream_id: Vec<i16>,
     destination: SocketAddr,
     error: &str,
 ) {
@@ -240,11 +249,13 @@ fn send_error_to_request(
         .send(Err(ResponseError {
             cause: anyhow!(error.to_owned()),
             destination,
-            stream_id,
+            stream_ids: stream_id,
         }))
         .ok();
 }
 
+// TODO: this is written to support connection pooling but we never actually do connection pooling.
+//       if we decide that we dont want connection pooling we could simplify this a bunch by just counting the expected incoming messages
 async fn rx_process<T: AsyncRead>(
     read: ReadHalf<T>,
     mut return_rx: mpsc::UnboundedReceiver<ReturnChannel>,
@@ -268,9 +279,10 @@ async fn rx_process<T: AsyncRead>(
     //
     // We can receive these in any order.
     // In order to handle that we have two seperate maps.
-    //
+
     // We store the sender here if we receive from the tx_process task first
-    let mut from_tx_process: HashMap<i16, oneshot::Sender<Response>> = HashMap::new();
+    //let mut from_tx_process: HashMap<i16, oneshot::Sender<Response>> = HashMap::new();
+    let mut from_tx_process: Vec<ReturnChannelCollecting> = vec![];
 
     // We store the response message here if we receive from the server first.
     let mut from_server: HashMap<i16, Message> = HashMap::new();
@@ -287,13 +299,21 @@ async fn rx_process<T: AsyncRead>(
                                     pushed_messages_tx.send(vec![m]).ok();
                                 }
                             } else if let Some(stream_id) = m.stream_id() {
-                                match from_tx_process.remove(&stream_id) {
-                                    None => {
-                                        from_server.insert(stream_id, m);
-                                    },
-                                    Some(return_tx) => {
-                                        return_tx.send(Ok(m)).ok();
+                                let mut message = Some(m);
+                                let mut to_delete = None;
+                                for (i, collector) in from_tx_process.iter_mut().enumerate() {
+                                    if collector.attempt_return_chan_on_new_message(&mut message, stream_id) {
+                                        to_delete = Some(i);
+                                    };
+                                    if message.is_none() {
+                                        break;
                                     }
+                                }
+                                if let Some(message) = message {
+                                    from_server.insert(stream_id, message);
+                                }
+                                if let Some(to_delete)=to_delete{
+                                    from_tx_process.remove(to_delete);
                                 }
                             }
                         }
@@ -318,14 +338,9 @@ async fn rx_process<T: AsyncRead>(
                 }
             },
             original_request = return_rx.recv() => {
-                if let Some(ReturnChannel { return_chan, stream_id }) = original_request {
-                    match from_server.remove(&stream_id) {
-                        None => {
-                            from_tx_process.insert(stream_id, return_chan);
-                        }
-                        Some(m) => {
-                            return_chan.send(Ok(m)).ok();
-                        }
+                if let Some(return_channel) = original_request {
+                    if let Some(return_chan) = ReturnChannelCollecting::new(return_channel, &mut from_server) {
+                        from_tx_process.push(return_chan);
                     }
                 } else {
                     // tx task has requested we shutdown cleanly
@@ -339,9 +354,101 @@ async fn rx_process<T: AsyncRead>(
     }
 }
 
+struct ReturnChannelCollecting {
+    return_chan: Option<oneshot::Sender<Response>>,
+    /// Defines the order the messages must be reassembled into
+    stream_ids: Vec<i16>,
+    /// This starts off with all id's but when collection is finished it will be all messages
+    collected: Vec<MessageOrId>,
+}
+
+enum MessageOrId {
+    Id(i16),
+    Message(Message),
+}
+
+impl ReturnChannelCollecting {
+    fn new(chan: ReturnChannel, from_server: &mut HashMap<i16, Message>) -> Option<Self> {
+        let mut collected: Vec<MessageOrId> = chan
+            .stream_ids
+            .iter()
+            .map(|x| MessageOrId::Id(*x))
+            .collect();
+        for item in collected.iter_mut() {
+            let stream_id = if let MessageOrId::Id(stream_id) = item {
+                stream_id
+            } else {
+                unreachable!()
+            };
+            if let Some(message) = from_server.remove(stream_id) {
+                *item = MessageOrId::Message(message);
+            }
+        }
+
+        if collected
+            .iter()
+            .all(|x| matches!(x, MessageOrId::Message(_)))
+        {
+            chan.return_chan
+                .send(Ok(std::mem::take(&mut collected)
+                    .into_iter()
+                    .map(|x| match x {
+                        MessageOrId::Message(m) => m,
+                        MessageOrId::Id(_) => unreachable!(),
+                    })
+                    .collect()))
+                .ok();
+            None
+        } else {
+            Some(ReturnChannelCollecting {
+                collected,
+                return_chan: Some(chan.return_chan),
+                stream_ids: chan.stream_ids,
+            })
+        }
+    }
+
+    /// Invariants: new_message must be Some
+    /// returns true when collection is finished
+    fn attempt_return_chan_on_new_message(
+        &mut self,
+        new_message: &mut Option<Message>,
+        new_stream_id: i16,
+    ) -> bool {
+        for item in self.collected.iter_mut() {
+            if let MessageOrId::Id(id) = item {
+                if *id == new_stream_id {
+                    *item = MessageOrId::Message(new_message.take().unwrap());
+                }
+            }
+        }
+
+        if self
+            .collected
+            .iter()
+            .all(|x| matches!(x, MessageOrId::Message(_)))
+        {
+            self.return_chan
+                .take()
+                .unwrap()
+                .send(Ok(std::mem::take(&mut self.collected)
+                    .into_iter()
+                    .map(|x| match x {
+                        MessageOrId::Message(m) => m,
+                        MessageOrId::Id(_) => unreachable!(),
+                    })
+                    .collect()))
+                .ok();
+            true
+        } else {
+            false
+        }
+    }
+}
+
 async fn send_errors_and_shutdown(
     mut return_rx: mpsc::UnboundedReceiver<ReturnChannel>,
-    mut waiting: HashMap<i16, oneshot::Sender<Response>>,
+    waiting: Vec<ReturnChannelCollecting>,
     rx_process_has_shutdown_tx: oneshot::Sender<String>,
     destination: SocketAddr,
     message: &str,
@@ -355,24 +462,26 @@ async fn send_errors_and_shutdown(
 
     return_rx.close();
 
-    for (stream_id, return_tx) in waiting.drain() {
-        return_tx
+    for collecting in waiting.into_iter() {
+        collecting
+            .return_chan
+            .unwrap()
             .send(Err(ResponseError {
                 cause: anyhow!(message.to_owned()),
                 destination,
-                stream_id,
+                stream_ids: collecting.stream_ids,
             }))
             .ok();
     }
 
-    // return_rx is already closed so by looping over all remaning values we ensure there are no dropped unused return_chan's
+    // return_rx is already closed so by looping over all remaining values we ensure there are no dropped unused return_chan's
     while let Some(return_chan) = return_rx.recv().await {
         return_chan
             .return_chan
             .send(Err(ResponseError {
                 cause: anyhow!(message.to_owned()),
                 destination,
-                stream_id: return_chan.stream_id,
+                stream_ids: return_chan.stream_ids,
             }))
             .ok();
     }
@@ -382,50 +491,39 @@ pub async fn receive(
     timeout_duration: Option<Duration>,
     failed_requests: &metrics::Counter,
     mut results: FuturesOrdered<oneshot::Receiver<Response>>,
-) -> Result<Vec<Result<Message, ResponseError>>> {
-    let expected_size = results.len();
-    let mut responses = Vec::with_capacity(expected_size);
-    while responses.len() < expected_size {
-        if let Some(timeout_duration) = timeout_duration {
-            match timeout(
-                timeout_duration,
-                receive_message(failed_requests, &mut results),
-            )
-            .await
-            {
-                Ok(response) => {
-                    responses.push(response);
-                }
-                Err(_) => {
-                    return Err(anyhow!(
-                        "timed out waiting for responses, received {:?} responses but expected {:?} responses",
-                        responses.len(),
-                        expected_size
-                    ));
-                }
-            }
-        } else {
-            responses.push(receive_message(failed_requests, &mut results).await);
+) -> Result<Result<Vec<Message>, ResponseError>> {
+    if let Some(timeout_duration) = timeout_duration {
+        match timeout(
+            timeout_duration,
+            receive_message(failed_requests, &mut results),
+        )
+        .await
+        {
+            Ok(response) => Ok(response),
+            Err(_) => Err(anyhow!("timed out waiting for responses")),
         }
+    } else {
+        Ok(receive_message(failed_requests, &mut results).await)
     }
-    Ok(responses)
 }
 
 async fn receive_message(
     failed_requests: &metrics::Counter,
     results: &mut FuturesOrdered<oneshot::Receiver<Response>>,
-) -> Result<Message, ResponseError> {
+) -> Result<Messages, ResponseError> {
     match results.next().await {
         Some(result) => match result.expect("The tx_process task must always return a value") {
-            Ok(message) => {
-                if let Ok(Metadata::Cassandra(CassandraMetadata {
-                    opcode: Opcode::Error,
-                    ..
-                })) = message.metadata()
-                {
-                    failed_requests.increment(1);
+            Ok(messages) => {
+                for message in &messages {
+                    if let Ok(Metadata::Cassandra(CassandraMetadata {
+                        opcode: Opcode::Error,
+                        ..
+                    })) = message.metadata()
+                    {
+                        failed_requests.increment(1);
+                    }
                 }
-                Ok(message)
+                Ok(messages)
             }
             err => err,
         },
