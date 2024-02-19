@@ -1,3 +1,14 @@
+// Allow dead code if any of the protocol features are disabled
+#![cfg_attr(
+    any(
+        not(feature = "cassandra"),
+        not(feature = "redis"),
+        not(feature = "kafka"),
+        not(feature = "opensearch"),
+    ),
+    allow(dead_code, unused_imports, unused_variables, unused_mut)
+)]
+
 #[allow(clippy::single_component_path_imports, unused_imports)]
 use rstest_reuse;
 

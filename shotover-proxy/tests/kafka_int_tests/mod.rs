@@ -1,8 +1,5 @@
-#[cfg(feature = "rdkafka-driver-tests")]
 use crate::shotover_process;
-#[cfg(feature = "rdkafka-driver-tests")]
 use std::time::Duration;
-#[cfg(feature = "rdkafka-driver-tests")]
 use test_helpers::docker_compose::docker_compose;
 
 #[cfg(feature = "rdkafka-driver-tests")]
