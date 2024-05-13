@@ -35,6 +35,6 @@ impl Transform for Loopback {
         for request in &mut requests_wrapper.requests {
             request.set_request_id(request.id());
         }
-        Ok(requests_wrapper.requests)
+        Ok(requests_wrapper.requests.clone())
     }
 }
