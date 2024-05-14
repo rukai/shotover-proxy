@@ -119,7 +119,7 @@ impl ConnectionFactory {
     ) -> Result<()> {
         // TODO: This sleep is currently load bearing...
         //       Need to delay progression until token has propagated.
-        tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
 
         let mut auth_requests = self.auth_requests.clone();
 
@@ -146,6 +146,11 @@ impl ConnectionFactory {
 
         // SCRAM client-first
         let hmac = general_purpose::STANDARD.encode(&scram_over_mtls.delegation_token.hmac);
+        tracing::info!(
+            "delegation_token hmac={} token_id={}",
+            hmac,
+            scram_over_mtls.delegation_token.token_id
+        );
         let mut scram = Scram::<Sha256>::new(
             scram_over_mtls.delegation_token.token_id.clone(),
             hmac,
