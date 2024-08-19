@@ -1219,6 +1219,7 @@ routing message to a random node so that:
                     // The broker always closes the connection after an auth failure response,
                     // so we should do the same.
                     if authenticate.error_code != 0 {
+                        tracing::info!("Closing connection to client after responses are sent");
                         *close_client_connection = true;
                     }
                     self.process_sasl_authenticate(authenticate)?;

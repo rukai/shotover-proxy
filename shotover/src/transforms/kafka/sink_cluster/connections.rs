@@ -156,16 +156,57 @@ impl Connections {
         destination: Destination,
     ) -> ConnectionState {
         let timeout = if let Some(scram_over_mtls) = authorize_scram_over_mtls {
-            scram_over_mtls.delegation_token_lifetime
+            // The delegation token is recreated after `0.5 * token_lifetime`
+            // Consider what happens when we match that timing for our connection timeout here:
+            //
+            //     create token t1      create token t2
+            // |--------------------|--------------------|
+            //                      ^ using a token after this point means we are working with a different token
+            //
+            //               token t1 lifetime
+            // |-----------------------------------------|
+            //                                           ^ we cannot use token t1 past this point
+            //
+            //                                   token t2 lifetime
+            //                      |-----------------------------------------|
+            //                      ^ all connections created after this point use token t2
+            //
+            //        connection lifetime using token t1
+            //            |--------------------|
+            // This case is fine, it exists entirely within a lifetime of a connection.
+            //
+            //
+            //                              connection lifetime using token t2
+            //                                  |--------------------|
+            // This case is fine, it exists entirely within a lifetime of a connection.
+            //
+            //
+            //                connection lifetime using token t2 (or is token t1?)
+            //                      |--------------------|
+            // This case is potentially a race condition.
+            // We could start with either token t2 or t1.
+            // If we start with t1 we could go past the end of t1's lifetime due to race conditions.
+            // To avoid this issue we reduce the size of the connection lifetime by a further 0.75 seconds.
+            //
+            // At low values of delegation_token_lifetime all of this falls apart since something
+            // like a VM migration could delay execution for many seconds.
+            // However for sufficently large delegation_token_lifetime values (> 1 hour) this should be fine.
+            scram_over_mtls
+                .delegation_token_lifetime
+                // match token recreation time
+                .mul_f32(0.5)
+                // further restrict connection timeout
+                .mul_f32(0.75)
         } else {
             // TODO: make this configurable
             //       for now, use the default value of connections.max.idle.ms (10 minutes)
-            Duration::from_secs(60 * 10)
+            let connections_max_idle = Duration::from_secs(60 * 10);
+            connections_max_idle.mul_f32(0.75)
         };
         if let Some(connection) = self.connections.get(&destination) {
             // TODO: subtract a batch level Instant::now instead of using elapsed
             // use 3/4 of the timeout to make sure we trigger this well before it actually times out
-            if connection.created_at.elapsed() > timeout.mul_f32(0.75) {
+            if connection.created_at.elapsed() > timeout {
                 ConnectionState::AtRiskOfTimeout
             } else {
                 ConnectionState::Open
