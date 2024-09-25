@@ -98,7 +98,7 @@ impl Transform for CassandraPeersRewrite {
                     &mut frame.operation
                 {
                     addr.set_port(self.port);
-                    response.invalidate_cache();
+                    response.commit_frame_by_clearing_raw_bytes();
                 }
             }
 
@@ -153,7 +153,7 @@ fn rewrite_port(message: &mut Message, column_names: &[Identifier], new_port: u1
                     }
                 }
             }
-            message.invalidate_cache();
+            message.commit_frame_by_clearing_raw_bytes();
         }
     }
 }

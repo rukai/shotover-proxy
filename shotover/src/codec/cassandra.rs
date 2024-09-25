@@ -1085,7 +1085,7 @@ mod cassandra_protocol_tests {
         for message in &mut parsed_messages {
             // This has the side effect of modifying the inner message to be parsed
             message.frame().unwrap();
-            message.invalidate_cache();
+            message.commit_frame_by_clearing_raw_bytes();
         }
         assert_eq!(parsed_messages, expected_messages);
 

@@ -157,7 +157,7 @@ impl Transform for KafkaSinkSingle {
                     for leader in &mut leader_and_isr.live_leaders {
                         leader.port = self.address_port as i32;
                     }
-                    request.invalidate_cache();
+                    request.commit_frame_by_clearing_raw_bytes();
                 }
             }
 
@@ -192,7 +192,7 @@ impl Transform for KafkaSinkSingle {
                             coordinator.port = port;
                         }
                     }
-                    response.invalidate_cache();
+                    response.commit_frame_by_clearing_raw_bytes();
                 }
                 Some(Frame::Kafka(KafkaFrame::Response {
                     body: ResponseBody::Metadata(metadata),
@@ -201,7 +201,7 @@ impl Transform for KafkaSinkSingle {
                     for broker in &mut metadata.brokers {
                         broker.1.port = port;
                     }
-                    response.invalidate_cache();
+                    response.commit_frame_by_clearing_raw_bytes();
                 }
                 Some(Frame::Kafka(KafkaFrame::Response {
                     body: ResponseBody::DescribeCluster(describe_cluster),
@@ -210,7 +210,7 @@ impl Transform for KafkaSinkSingle {
                     for broker in &mut describe_cluster.brokers {
                         broker.1.port = port;
                     }
-                    response.invalidate_cache();
+                    response.commit_frame_by_clearing_raw_bytes();
                 }
                 _ => {}
             }

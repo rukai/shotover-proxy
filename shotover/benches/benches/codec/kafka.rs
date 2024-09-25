@@ -83,7 +83,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             );
             // force the message to be parsed and clear raw message
             message.frame();
-            message.invalidate_cache();
+            message.commit_frame_by_clearing_raw_bytes();
 
             let messages = vec![message];
 
@@ -119,7 +119,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             );
             // force the message to be parsed and clear raw message
             message.frame();
-            message.invalidate_cache();
+            message.commit_frame_by_clearing_raw_bytes();
 
             messages.push(message);
         }

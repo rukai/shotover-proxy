@@ -115,7 +115,7 @@ impl Transform for DebugForceParse {
             }
             if self.encode_requests {
                 request.frame();
-                request.invalidate_cache();
+                request.commit_frame_by_clearing_raw_bytes();
             }
         }
 
@@ -128,7 +128,7 @@ impl Transform for DebugForceParse {
                 }
                 if self.encode_responses {
                     response.frame();
-                    response.invalidate_cache();
+                    response.commit_frame_by_clearing_raw_bytes();
                 }
             }
         }

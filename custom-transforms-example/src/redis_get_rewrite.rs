@@ -85,7 +85,7 @@ impl Transform for RedisGetRewrite {
             {
                 if let Some(frame) = response.frame() {
                     rewrite_get(frame, &self.result);
-                    response.invalidate_cache();
+                    response.commit_frame_by_clearing_raw_bytes();
                 }
             }
         }

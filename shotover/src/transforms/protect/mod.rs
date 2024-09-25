@@ -198,7 +198,7 @@ impl Transform for Protect {
                 }
             }
             if invalidate_cache {
-                message.invalidate_cache();
+                message.commit_frame_by_clearing_raw_bytes();
             }
         }
 
@@ -222,7 +222,7 @@ impl Transform for Protect {
                     }
                 }
                 if invalidate_cache {
-                    response.invalidate_cache();
+                    response.commit_frame_by_clearing_raw_bytes();
                 }
             }
         }

@@ -289,7 +289,7 @@ impl MessageRewriter {
                     warnings.extend(get_warnings(&mut local_response));
 
                     self.rewrite_table_local(table, &mut local_response, peers_response, warnings)?;
-                    local_response.invalidate_cache();
+                    local_response.commit_frame_by_clearing_raw_bytes();
                     responses.push(local_response);
                 }
                 RewriteTableTy::Peers => {
@@ -326,7 +326,7 @@ impl MessageRewriter {
                     };
 
                     self.rewrite_table_peers(table, &mut client_peers_response, nodes, warnings)?;
-                    client_peers_response.invalidate_cache();
+                    client_peers_response.commit_frame_by_clearing_raw_bytes();
                     responses.push(client_peers_response);
                 }
                 RewriteTableTy::Prepare { .. } => {

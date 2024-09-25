@@ -671,7 +671,7 @@ impl KafkaSinkCluster {
                     }
                     fetch.session_id = 0;
                     fetch.session_epoch = -1;
-                    request.invalidate_cache();
+                    request.commit_frame_by_clearing_raw_bytes();
                 }
                 Some(Frame::Kafka(KafkaFrame::Request {
                     body:
@@ -989,7 +989,7 @@ impl KafkaSinkCluster {
                 // The request has been split so it may be delivered to multiple destinations.
                 // We must generate a unique request for each destination.
                 let combine_responses = routing.len();
-                request.invalidate_cache();
+                request.commit_frame_by_clearing_raw_bytes();
                 for (i, (destination, topic_data)) in routing.into_iter().enumerate() {
                     let destination = if destination == -1 {
                         random_broker_id(&self.nodes, &mut self.rng)
@@ -1204,7 +1204,7 @@ impl KafkaSinkCluster {
                 // The message has been split so it may be delivered to multiple destinations.
                 // We must generate a unique message for each destination.
                 let combine_responses = routing.len();
-                message.invalidate_cache();
+                message.commit_frame_by_clearing_raw_bytes();
                 for (i, (destination, topics)) in routing.into_iter().enumerate() {
                     let destination = if destination == -1 {
                         random_broker_id(&self.nodes, &mut self.rng)
@@ -1789,7 +1789,7 @@ impl KafkaSinkCluster {
             }
         }
 
-        base.invalidate_cache();
+        base.commit_frame_by_clearing_raw_bytes();
 
         Ok(base)
     }
@@ -1950,7 +1950,7 @@ impl KafkaSinkCluster {
                 if let PendingRequestTy::FindCoordinator(request) = request_ty {
                     self.process_find_coordinator_response(*version, request, find_coordinator);
                     self.rewrite_find_coordinator_response(*version, find_coordinator);
-                    response.invalidate_cache();
+                    response.commit_frame_by_clearing_raw_bytes();
                 } else {
                     return Err(anyhow!("Received find_coordinator but not requested"));
                 }
@@ -1975,7 +1975,7 @@ impl KafkaSinkCluster {
                         }
                     }
 
-                    response.invalidate_cache();
+                    response.commit_frame_by_clearing_raw_bytes();
                 }
             }
             Some(Frame::Kafka(KafkaFrame::Response {
@@ -2036,7 +2036,7 @@ impl KafkaSinkCluster {
                             ProduceResponseLeaderIdAndEpoch::default();
                     }
                 }
-                response.invalidate_cache();
+                response.commit_frame_by_clearing_raw_bytes();
             }
             Some(Frame::Kafka(KafkaFrame::Response {
                 body: ResponseBody::Fetch(fetch),
@@ -2065,7 +2065,7 @@ impl KafkaSinkCluster {
                         }
                     }
                 }
-                response.invalidate_cache();
+                response.commit_frame_by_clearing_raw_bytes();
             }
             Some(Frame::Kafka(KafkaFrame::Response {
                 body: ResponseBody::ListOffsets(list_offsets),
@@ -2198,7 +2198,7 @@ impl KafkaSinkCluster {
             })) => {
                 self.process_metadata_response(metadata).await;
                 self.rewrite_metadata_response(metadata)?;
-                response.invalidate_cache();
+                response.commit_frame_by_clearing_raw_bytes();
             }
             Some(Frame::Kafka(KafkaFrame::Response {
                 body: ResponseBody::DescribeCluster(_),

@@ -96,7 +96,7 @@ pub struct Message {
     pub(crate) received_from_source_or_sink_at: Option<Instant>,
     pub(crate) codec_state: CodecState,
 
-    // TODO: Consider removing the "ignore" down the line, we we need it for now for compatibility with logic using the old style "in order protocol" assumption.
+    // TODO: Consider removing the "ignore" down the line, we need it for now for compatibility with logic using the old style "in order protocol" assumption.
     #[derivative(PartialEq = "ignore")]
     pub(crate) id: MessageId,
     #[derivative(PartialEq = "ignore")]
@@ -355,19 +355,41 @@ impl Message {
         })
     }
 
-    /// Invalidates all internal caches.
-    /// This must be called after any modifications to the return value of `Message::frame()`.
+    /// Commits changes made to the frame.
+    /// This is done by clearing the raw message bytes, making the frame the source of truth.
+    /// A `commit_frame_*` method must be called after any modifications to the return value of `Message::frame()`.
     /// Otherwise values returned by getter methods and the message sent to the DB will be outdated.
+    ///
+    /// Always prefer this method over `commit_frame_and_clear_frame` unless you are implementing a Sink transform
+    /// and are certain frame will not be called again before the message is sent.
     ///
     /// An error will be logged if this method is called without first making a call to `Message::frame()` that returns Some(_).
     /// This is because it is a noop in that case and likely a mistake.
     ///
     /// ## Performance implications
-    /// * Clears caches used by getter methods
     /// * If `Message::frame()` has been called the message bytes must be regenerated from the `Frame` when sent to the DB
-    pub fn invalidate_cache(&mut self) {
-        // TODO: clear message details cache fields if we ever add any
+    pub fn commit_frame_by_clearing_raw_bytes(&mut self) {
+        self.inner = self.inner.take().map(|x| x.invalidate_cache());
+    }
 
+    /// Commits changes made to the frame.
+    /// This is done by encoding the frame into the raw bytes and clearing the frame, making the raw bytes the source of truth.
+    /// A `commit_frame_*` method must be called after any modifications to the return value of `Message::frame()`.
+    /// Otherwise values returned by getter methods and the message sent to the DB will be outdated.
+    ///
+    /// Always prefer `commit_frame_and_clear_frame` over this method unless all of the following is true:
+    /// * you are implementing a Sink transform or are otherwise directly hitting an endpoint without any other transforms in between.
+    /// * you are certain frame will not be called again before the message is sent.
+    /// * you need to clone the message
+    ///
+    /// If any of these are not true you will get better performance with `commit_frame_and_clear_raw_bytes`.
+    ///
+    /// An error will be logged if this method is called without first making a call to `Message::frame()` that returns Some(_).
+    /// This is because it is a noop in that case and likely a mistake.
+    ///
+    /// ## Performance implications
+    /// * If `Message::frame()` has been called the message bytes must be regenerated from the `Frame` when sent to the DB
+    pub fn commit_frame_by_clearing_frame(&mut self) {
         self.inner = self.inner.take().map(|x| x.invalidate_cache());
     }
 
