@@ -9,6 +9,7 @@ use crate::transforms::{
 use crate::transforms::{TransformConfig, TransformContextConfig};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
+use bytes::{Bytes, BytesMut};
 use connections::{Connections, Destination};
 use dashmap::DashMap;
 use kafka_node::{ConnectionFactory, KafkaAddress, KafkaNode, KafkaNodeState};
@@ -213,6 +214,7 @@ impl TransformBuilder for KafkaSinkClusterBuilder {
             sasl_mechanism: None,
             authorize_scram_over_mtls: self.authorize_scram_over_mtls.as_ref().map(|x| x.build()),
             refetch_backoff: Duration::from_millis(1),
+            next_fetch_progress: Default::default(),
         })
     }
 
@@ -275,7 +277,10 @@ struct KafkaSinkCluster {
     authorize_scram_over_mtls: Option<AuthorizeScramOverMtls>,
     connections: Connections,
     refetch_backoff: Duration,
+    next_fetch_progress: HashMap<TopicPartition, Vec<Bytes>>,
 }
+
+type TopicPartition = (TopicName, i32);
 
 /// State of a Request/Response is maintained by this enum.
 /// The state progresses from Routed -> Sent -> Received
@@ -1428,12 +1433,30 @@ impl KafkaSinkCluster {
                             if let PendingRequestState::Received {
                                 destination,
                                 request,
-                                ..
+                                response,
                             } = &mut pending_request.state
                             {
                                 pending_request.state = PendingRequestState::Routed {
                                     destination: *destination,
                                     request: request.take().unwrap(),
+                                };
+
+                                // TODO: insert at correct location
+                                if let Some(Frame::Kafka(KafkaFrame::Response {
+                                    body: ResponseBody::Fetch(fetch),
+                                    ..
+                                })) = response.frame()
+                                {
+                                    for response in fetch.responses {
+                                        for partition in response.partitions {
+                                            self.next_fetch_progress.insert(
+                                                (response.topic, partition.partition_index),
+                                                partition.records,
+                                            );
+                                        }
+                                    }
+                                } else {
+                                    panic!("Must be fetch");
                                 }
                             } else {
                                 unreachable!()
@@ -1444,6 +1467,39 @@ impl KafkaSinkCluster {
                         break;
                     } else {
                         self.refetch_backoff = Duration::from_millis(1);
+
+                        if !self.next_fetch_progress.is_empty() {
+                            if let PendingRequestState::Received { response, .. } =
+                                &mut pending_request.state
+                            {
+                                if let Some(Frame::Kafka(KafkaFrame::Response {
+                                    body: ResponseBody::Fetch(fetch),
+                                    ..
+                                })) = response.frame()
+                                {
+                                    for response in &mut fetch.responses {
+                                        for partition in &mut response.partitions {
+                                            if let Some(extra_records) = self
+                                                .next_fetch_progress
+                                                .get(&(response.topic, partition.partition_index))
+                                            {
+                                                // prefix records with all the stored extra records
+                                                let records = BytesMut::new();
+                                                for record in extra_records {
+                                                    records.push(record);
+                                                }
+                                                if let Some(records) = partition.records {
+                                                    records.push(records);
+                                                }
+                                                partition.records = Some(records.freeze())
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    panic!("Must be fetch");
+                                }
+                            }
+                        }
                     }
                 }
 
