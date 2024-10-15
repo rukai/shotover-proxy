@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::tcp::tcp_stream;
 use crate::transforms::kafka::sink_cluster::kafka_node::KafkaAddress;
 use atomic_enum::atomic_enum;
