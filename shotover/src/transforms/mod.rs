@@ -273,7 +273,7 @@ impl<'shorter, 'longer: 'shorter> ChainState<'longer> {
             .iter_mut()
             .map(|x| x.to_high_level_string())
             .collect::<Vec<_>>();
-        format!("{:?}", messages)
+        format!("{messages:?}")
     }
 
     pub fn reset(&mut self, transforms: &'longer mut [TransformAndMetrics]) {

@@ -52,8 +52,7 @@ pub async fn assert_query_result_contains_row(
     let result_rows = session.execute(query).await;
     if !result_rows.contains(&row.to_vec()) {
         panic!(
-            "expected row: {:?} missing from actual rows: {:?}",
-            row, result_rows
+            "expected row: {row:?} missing from actual rows: {result_rows:?}"
         );
     }
 }
@@ -67,8 +66,7 @@ pub async fn assert_query_result_not_contains_row(
     let result_rows = session.execute(query).await;
     if result_rows.contains(&row.to_vec()) {
         panic!(
-            "unexpected row: {:?} was found in actual rows: {:?}",
-            row, result_rows
+            "unexpected row: {row:?} was found in actual rows: {result_rows:?}"
         );
     }
 }

@@ -28,8 +28,7 @@ async fn query(connection: &CassandraConnection) {
     run_query(
         connection,
         &format!(
-            "UPDATE test_timestamps.test_table USING TIMESTAMP {} SET a = 'a1-modified-1' WHERE id = 0;",
-            timestamp
+            "UPDATE test_timestamps.test_table USING TIMESTAMP {timestamp} SET a = 'a1-modified-1' WHERE id = 0;"
         ),
     )
     .await;

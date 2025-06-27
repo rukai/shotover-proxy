@@ -121,7 +121,7 @@ fn get_type_example(col_type: ColType) -> Vec<&'static str> {
         ColType::Time => vec!["'08:12:54'", "'08:12:55'", "'08:12:56'"],
         ColType::Smallint => vec!["32765", "32766", "32767"],
         ColType::Tinyint => vec!["121", "122", "123"],
-        _ => panic!("dont have an example for {}", col_type),
+        _ => panic!("dont have an example for {col_type}"),
     }
 }
 
@@ -230,7 +230,7 @@ fn get_type_example_result_value(col_type: ColType) -> Vec<ResultValue> {
             ResultValue::TinyInt(122),
             ResultValue::TinyInt(123),
         ],
-        _ => panic!("dont have an example for {}", col_type),
+        _ => panic!("dont have an example for {col_type}"),
     }
 }
 

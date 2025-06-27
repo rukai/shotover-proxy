@@ -185,9 +185,8 @@ async fn test(state: &mut State, args: Vec<String>) -> Result<(), Box<dyn Error>
             r#"
 source .profile
 cd shotover
-cargo nextest run {} 2>&1
-"#,
-            args
+cargo nextest run {args} 2>&1
+"#
         ))
         .await;
     while let Some(line) = receiver.recv().await {

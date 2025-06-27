@@ -157,8 +157,7 @@ impl CdrsConnection {
         let row = self
             .session
             .query(format!(
-                "SELECT coordinator FROM system_traces.sessions WHERE session_id = {}",
-                tracing_id
+                "SELECT coordinator FROM system_traces.sessions WHERE session_id = {tracing_id}"
             ))
             .await
             .unwrap()

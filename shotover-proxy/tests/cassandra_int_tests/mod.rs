@@ -838,8 +838,7 @@ async fn request_throttling(#[case] driver: CassandraDriver) {
                 ..
             }) => false,
             Err(e) => panic!(
-                "wrong error returned, got {:?}, expected SERVER_OVERLOADED",
-                e
+                "wrong error returned, got {e:?}, expected SERVER_OVERLOADED"
             ),
         });
 
@@ -861,7 +860,7 @@ async fn request_throttling(#[case] driver: CassandraDriver) {
     {
         let mut queries: Vec<String> = vec![];
         for i in 0..25 {
-            queries.push(format!("INSERT INTO test_keyspace.my_table (id, lastname, firstname) VALUES ({}, 'text', 'text')", i));
+            queries.push(format!("INSERT INTO test_keyspace.my_table (id, lastname, firstname) VALUES ({i}, 'text', 'text')"));
         }
         connection.execute_batch(queries).await;
     }
@@ -872,7 +871,7 @@ async fn request_throttling(#[case] driver: CassandraDriver) {
     {
         let mut queries: Vec<String> = vec![];
         for i in 0..60 {
-            queries.push(format!("INSERT INTO test_keyspace.my_table (id, lastname, firstname) VALUES ({}, 'text', 'text')", i));
+            queries.push(format!("INSERT INTO test_keyspace.my_table (id, lastname, firstname) VALUES ({i}, 'text', 'text')"));
         }
         let result = connection
             .execute_batch_fallible(queries)

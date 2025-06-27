@@ -111,7 +111,7 @@ impl CqlWsSession {
         let envelope = Self::decode(self.in_rx.recv().await.unwrap());
 
         match envelope.opcode {
-            Opcode::Ready => println!("cql-ws: received: {:?}", envelope),
+            Opcode::Ready => println!("cql-ws: received: {envelope:?}"),
             Opcode::Authenticate => {
                 todo!();
             }

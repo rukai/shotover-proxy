@@ -53,7 +53,7 @@ impl LogFilterHttpExporter {
         let address = self.address;
         let listener = tokio::net::TcpListener::bind(address)
             .await
-            .with_context(|| format!("Failed to bind to {}", address))?;
+            .with_context(|| format!("Failed to bind to {address}"))?;
         axum::serve(listener, app).await.map_err(|e| anyhow!(e))
     }
 }

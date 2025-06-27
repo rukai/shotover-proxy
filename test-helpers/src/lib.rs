@@ -102,11 +102,10 @@ mod tests {
             if let Some(error_message) = panic_info.downcast_ref::<String>() {
                 assert!(
                     error_message.contains("Attempted to run the command `shotover_non_existent_command arg1 arg2` but shotover_non_existent_command does not exist. Have you installed shotover_non_existent_command?"),
-                    "Error message did not contain the expected NotFound error got: {}",
-                    error_message
+                    "Error message did not contain the expected NotFound error got: {error_message}"
                 );
             } else {
-                panic!("Panic payload was not a string: {:?}", panic_info);
+                panic!("Panic payload was not a string: {panic_info:?}");
             }
         }
     }

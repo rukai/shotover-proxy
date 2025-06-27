@@ -67,12 +67,12 @@ async fn select(shotover_session: &CassandraConnection) {
     for i in 0..5 {
         assert_query_result(
             shotover_session,
-            &format!("SELECT pk, cluster, col1, col2 FROM test_protect_keyspace.test_table WHERE pk = 'pk{}'", i),
+            &format!("SELECT pk, cluster, col1, col2 FROM test_protect_keyspace.test_table WHERE pk = 'pk{i}'"),
             &[
                 &[
-                    ResultValue::Varchar(format!("pk{}", i)),
+                    ResultValue::Varchar(format!("pk{i}")),
                     ResultValue::Varchar("cluster".into()),
-                    ResultValue::Blob(format!("encrypted{}", i).into()),
+                    ResultValue::Blob(format!("encrypted{i}").into()),
                     ResultValue::Int(i),
                 ],
             ],

@@ -844,12 +844,12 @@ impl Display for CassandraFrame {
         match self.tracing {
             Tracing::Request(request) => {
                 if request {
-                    write!(f, " request_tracing_id:{}", request)?;
+                    write!(f, " request_tracing_id:{request}")?;
                 }
             }
             Tracing::Response(response) => {
                 if let Some(tracing_id) = response {
-                    write!(f, " tracing_id:{}", tracing_id)?;
+                    write!(f, " tracing_id:{tracing_id}")?;
                 }
             }
         }
@@ -873,38 +873,37 @@ impl Display for CassandraFrame {
 
                 write!(
                     f,
-                    " Query consistency:{} with_names:{:?}",
-                    consistency, with_names,
+                    " Query consistency:{consistency} with_names:{with_names:?}",
                 )?;
 
                 if let Some(values) = values {
-                    write!(f, " values:{:?}", values)?;
+                    write!(f, " values:{values:?}")?;
                 }
                 if let Some(page_size) = page_size {
-                    write!(f, " page_size:{:?}", page_size)?;
+                    write!(f, " page_size:{page_size:?}")?;
                 }
                 if let Some(paging_state) = paging_state {
-                    write!(f, " paging_state:{:?}", paging_state)?;
+                    write!(f, " paging_state:{paging_state:?}")?;
                 }
                 if let Some(serial_consistency) = serial_consistency {
-                    write!(f, " serial_consistency:{:?}", serial_consistency)?;
+                    write!(f, " serial_consistency:{serial_consistency:?}")?;
                 }
                 if let Some(timestamp) = timestamp {
-                    write!(f, " timestamp:{:?}", timestamp)?;
+                    write!(f, " timestamp:{timestamp:?}")?;
                 }
                 if let Some(keyspace) = keyspace {
-                    write!(f, " keyspace:{:?}", keyspace)?;
+                    write!(f, " keyspace:{keyspace:?}")?;
                 }
                 if let Some(now_in_seconds) = now_in_seconds {
-                    write!(f, " now_in_seconds:{:?}", now_in_seconds)?;
+                    write!(f, " now_in_seconds:{now_in_seconds:?}")?;
                 }
-                write!(f, " {}", query)
+                write!(f, " {query}")
             }
             CassandraOperation::Register(BodyReqRegister { events }) => {
-                write!(f, " Register {:?}", events)
+                write!(f, " Register {events:?}")
             }
             CassandraOperation::Error(ErrorBody { message, ty }) => {
-                write!(f, " Error {:?} {:?}", ty, message)
+                write!(f, " Error {ty:?} {message:?}")
             }
             CassandraOperation::Result(result) => match result {
                 CassandraResult::Rows { rows, metadata } => {
@@ -919,14 +918,13 @@ impl Display for CassandraFrame {
 
                     write!(
                         f,
-                        " Result Rows {:?} columns_count:{}",
-                        flags, columns_count,
+                        " Result Rows {flags:?} columns_count:{columns_count}",
                     )?;
                     if let Some(paging_state) = paging_state {
-                        write!(f, " paging_state:{:?}", paging_state)?;
+                        write!(f, " paging_state:{paging_state:?}")?;
                     }
                     if let Some(new_metadata_id) = new_metadata_id {
-                        write!(f, " new_metadata_id:{:?}", new_metadata_id)?;
+                        write!(f, " new_metadata_id:{new_metadata_id:?}")?;
                     }
                     if let Some(global_table_spec) = global_table_spec {
                         write!(
@@ -950,22 +948,22 @@ impl Display for CassandraFrame {
                             write!(f, ", ")?;
                         }
                         need_comma = true;
-                        write!(f, "{}:{:?}", name, id)?;
+                        write!(f, "{name}:{id:?}")?;
                         if let Some(value) = value {
-                            write!(f, " of {:?}", value)?;
+                            write!(f, " of {value:?}")?;
                         }
                         if let Some(table_spec) = table_spec {
-                            write!(f, " table_spec:{:?}", table_spec)?;
+                            write!(f, " table_spec:{table_spec:?}")?;
                         }
                     }
                     write!(f, "]")?;
                     for row in rows {
-                        write!(f, "\n    {:?}", row)?;
+                        write!(f, "\n    {row:?}")?;
                     }
                     Ok(())
                 }
                 CassandraResult::Void => write!(f, " Result Void"),
-                _ => write!(f, " Result {:?}", result),
+                _ => write!(f, " Result {result:?}"),
             },
             CassandraOperation::Ready(_) => write!(f, " Ready"),
             _ => write!(f, " {:?}", self.operation),

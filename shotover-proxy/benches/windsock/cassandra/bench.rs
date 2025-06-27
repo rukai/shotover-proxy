@@ -130,7 +130,7 @@ impl Operation {
 
                     for i in 0..ROW_COUNT {
                         session
-                            .query(&format!("INSERT INTO ks.bench(id) VALUES ({})", i))
+                            .query(&format!("INSERT INTO ks.bench(id) VALUES ({i})"))
                             .await;
                     }
                 }

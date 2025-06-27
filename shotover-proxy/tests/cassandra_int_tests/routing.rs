@@ -319,8 +319,7 @@ mod composite_key {
             let address = "'127.0.0.1'";
 
             let insert = format!(
-                "INSERT INTO stresscql2small.typestest (name, choice, address) VALUES ('{}', {}, {});",
-                name, choice, address
+                "INSERT INTO stresscql2small.typestest (name, choice, address) VALUES ('{name}', {choice}, {address});"
             );
             run_query(connection, &insert).await;
         }
@@ -392,7 +391,7 @@ pub async fn test(
                 .await;
         shotover
             .enable_schema_awaiter(
-                &format!("{}:{}", cassandra_contact_point, cassandra_port),
+                &format!("{cassandra_contact_point}:{cassandra_port}"),
                 None,
             )
             .await;

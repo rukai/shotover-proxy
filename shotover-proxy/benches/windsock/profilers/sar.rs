@@ -46,7 +46,7 @@ pub fn insert_sar_results_to_bench_archive(
                 // sar calls this a KB (kilobyte) but its actually a KiB (kibibyte)
                 let value_kib: f32 = value.parse().unwrap();
                 let value_mib = value_kib / 1024.0;
-                format!("{} MiB", value_mib)
+                format!("{value_mib} MiB")
             },
             "kbmemused",
             Goal::SmallerIsBetter,

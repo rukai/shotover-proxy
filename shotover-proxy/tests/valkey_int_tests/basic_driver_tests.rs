@@ -965,8 +965,7 @@ fn assert_cluster_ports_rewrite_slots(res: Value, new_port: u16) {
     }
     if !assertion_run {
         panic!(
-            "CLUSTER SLOTS result did not contain a port, result was: {:?}",
-            res
+            "CLUSTER SLOTS result did not contain a port, result was: {res:?}"
         );
     }
 }

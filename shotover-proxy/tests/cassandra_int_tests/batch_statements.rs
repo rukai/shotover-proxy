@@ -67,7 +67,7 @@ async fn use_statement(connection: &CassandraConnection) {
 async fn insert_batch(connection: &CassandraConnection) {
     let mut batch = vec![];
     for i in 0..2 {
-        batch.push(format!("INSERT INTO batch_keyspace.batch_table (id, lastname, firstname) VALUES ({}, 'text1', 'text2')", i));
+        batch.push(format!("INSERT INTO batch_keyspace.batch_table (id, lastname, firstname) VALUES ({i}, 'text1', 'text2')"));
     }
     connection.execute_batch(batch).await;
 
@@ -94,8 +94,7 @@ async fn update_batch(connection: &CassandraConnection) {
     let mut batch = vec![];
     for i in 0..2 {
         batch.push(format!(
-            "UPDATE batch_keyspace.batch_table SET lastname = 'text3' WHERE id = {};",
-            i
+            "UPDATE batch_keyspace.batch_table SET lastname = 'text3' WHERE id = {i};"
         ));
     }
     connection.execute_batch(batch).await;
@@ -123,8 +122,7 @@ async fn delete_batch(connection: &CassandraConnection) {
     let mut batch = vec![];
     for i in 0..2 {
         batch.push(format!(
-            "DELETE FROM batch_keyspace.batch_table WHERE id = {};",
-            i
+            "DELETE FROM batch_keyspace.batch_table WHERE id = {i};"
         ));
     }
     connection.execute_batch(batch).await;

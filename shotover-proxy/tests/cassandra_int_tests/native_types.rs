@@ -61,7 +61,7 @@ tinyint_test,
 varchar_test,
 varint_test)
 VALUES (
-{},
+{i},
 84196262-53de-11ec-bf63-0242ac130002,
 'ascii string',
 1844674407370,
@@ -79,8 +79,7 @@ true,
 84196262-53de-11ec-bf63-0242ac130002,
 127,
 'varchar',
-198121);",
-                i
+198121);"
             )
             .as_str(),
         )

@@ -131,8 +131,7 @@ async fn run_command_to_stdout(command: &str, args: &[&str]) {
 
     if !status.success() {
         println!(
-            "Failed to run windsock, command {} {:?} exited with {:?}",
-            command, args, status
+            "Failed to run windsock, command {command} {args:?} exited with {status:?}"
         );
         std::process::exit(status.code().unwrap_or(1))
     }

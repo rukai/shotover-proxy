@@ -558,7 +558,7 @@ impl Message {
 
     pub fn to_high_level_string(&mut self) -> String {
         if let Some(response) = self.frame() {
-            format!("{}", response)
+            format!("{response}")
         } else if let Some(MessageInner::RawBytes {
             bytes,
             message_type,
