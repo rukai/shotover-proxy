@@ -37,6 +37,10 @@ jobs:
       run: cargo run -p website
     - name: Setup Pages
       uses: actions/configure-pages@v4
+    - name: Hack to fix upload-pages-artifact bug
+      # see https://github.com/actions/deploy-pages/issues/383
+      # without this fix, tagging a commit tagged as a release will silently skip the upload of the new website which includes the docs for the new tag.
+      run: echo "GITHUB_SHA=$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 32 ; echo)" >> $GITHUB_ENV
     - name: Upload pages
       uses: actions/upload-pages-artifact@v3
       with:
