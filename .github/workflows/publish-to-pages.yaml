@@ -37,13 +37,41 @@ jobs:
       run: cargo run -p website
     - name: Setup Pages
       uses: actions/configure-pages@v4
-    - name: Hack to fix upload-pages-artifact bug
-      # see https://github.com/actions/deploy-pages/issues/383
-      # without this fix, tagging a commit tagged as a release will silently skip the upload of the new website which includes the docs for the new tag.
-      run: echo "GITHUB_SHA=$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 32 ; echo)" >> $GITHUB_ENV
     - name: Upload pages
       uses: actions/upload-pages-artifact@v3
       with:
         path: 'website/root'
-    - name: Deploy pages
-      uses: actions/deploy-pages@v4
+    - name: Create GitHub Pages Deployment
+      id: deployment
+      uses: actions/github-script@v7
+      with:
+        script: |
+          // Get the artifact ID from the upload step
+          const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            run_id: context.runId,
+          });
+          
+          const artifact = artifacts.data.artifacts.find(
+            artifact => artifact.name === 'github-pages'
+          );
+          
+          if (!artifact) {
+            throw new Error('GitHub Pages artifact not found');
+          }
+          
+          // Create the Pages deployment
+          const deployment = await github.rest.repos.createPagesDeployment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            artifact_id: artifact.id,
+            pages_build_version: 'latest',
+            oidc_token: process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN,
+            preview: false
+          });
+          
+          console.log('Deployment created:', deployment.data);
+          core.setOutput('page_url', `https://${context.repo.owner}.github.io/${context.repo.repo}/`);
+          
+          return deployment.data;
