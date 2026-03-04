@@ -51,8 +51,24 @@ jobs:
           # downsides:
           # * PRs that update rust version or changes deps will be slow to iterate on due to changes not being cached.
           save-if: ${{ github.ref == 'refs/heads/main' }}
+
+          # Our workspace contains crates like test-helpers that are only changed sometimes,
+          # so enabling this gives a nice speedup at the cost of extra cache storage.
+          cache-all-crates: "true"
+          cache-workspace-crates: "true"
+      # If we cache the j4rs build as done above in the rust-cache action, we also need to cache the jassets directory created by j4rs.
+      # Even though the rust-cache action caches the target directory, it ignores non-standard folders inside it, so we need to manually cache jassets seperately.
+      #
+      # Note that: evicting this cache without evicting the rust-cache will lead to CI failures, however as long as our caches are well within the 10GB limit we should be fine.
+      - name: Cache jassets
+        uses: actions/cache@v5
+        with:
+          path: target/${{ matrix.profile }}/jassets
+          # cache can be global as java assets work regardless of OS+arch
+          key: jassets-${{ hashFiles('Cargo.lock') }}
+          restore-keys: jassets-
       - name: cache custom ubuntu packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: shotover-proxy/build/packages
           key: ubuntu-24.04-packages
@@ -61,27 +77,11 @@ jobs:
       - name: Install nextest
         uses: taiki-e/install-action@v2
         with:
-          tool: nextest@0.9.70
-
-        # It is currently impossible to combine j4rs, rust-cache and nextest:
-        # * j4rs needs to store jars somewhere, by default this is in target/debug/jassets, we do have the option to move this somewhere outside of target.
-        # * rust-cache will delete all files in target/debug other than `build`, `deps` and `.fingerprint`
-        # * nextest will only archive files within the target directory
-        # There is no way of combining all of these requirements.
-        # We will need to find one of these projects that is suitable to have its requirements loosened.
-        # I suspect that rust-cache is the project that needs to change, maybe add a config field to include extra paths in the cache, similar to nextest's archive.include.
-        # This is going to be tricky and require discussion with the various upstream projects, and will take a while to land anything.
-        #
-        # So for now we need a quick workaround.
-        # This workaround is to force j4rs to be rebuilt from scratch via cargo clean.
-        # This has a cost on CI runtime and in the future we should find another solution as discussed above.
-      - name: Workaround j4rs cache issue
-        run: cargo clean -p j4rs ${{ matrix.cargo_flags }}
-
+          tool: nextest@0.9.129
       - name: Build tests
         run: |
-          cargo test --doc ${{ matrix.cargo_flags }} --all-features -- --show-output --nocapture
           cargo nextest archive --archive-file nextest-${{ matrix.profile }}.tar.zst ${{ matrix.cargo_flags }} --all-features --all-targets
+          cargo test --doc ${{ matrix.cargo_flags }} --all-features
       - name: Upload built tests to workflow
         uses: actions/upload-artifact@v4
         with:
@@ -104,6 +104,12 @@ jobs:
             git status
             exit 1
           fi
+      - name: Save jassets cache
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v5
+        with:
+          path: target/${{ matrix.profile }}/jassets
+          key: jassets-${{ hashFiles('foo/Cargo.lock') }}
 
   run_tests_partitioned:
     strategy:
