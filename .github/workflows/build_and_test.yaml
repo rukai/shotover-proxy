@@ -76,6 +76,7 @@ jobs:
         with:
           path: shotover-proxy/build/packages
           key: ubuntu-24.04-packages
+      - run: tree target
       - name: Install ubuntu packages
         run: shotover-proxy/build/install_ubuntu_packages.sh
       - name: Install nextest
@@ -83,7 +84,9 @@ jobs:
         with:
           tool: nextest@0.9.129
       - name: Build tests
-        run: cargo nextest archive --archive-file nextest-${{ matrix.profile }}.tar.zst ${{ matrix.cargo_flags }} --all-features --all-targets
+        run: |
+          cargo build ${{ matrix.cargo_flags }} --all-features --all-targets --verbose
+          cargo nextest archive --archive-file nextest-${{ matrix.profile }}.tar.zst ${{ matrix.cargo_flags }} --all-features --all-targets --verbose
       - name: Upload built tests to workflow
         uses: actions/upload-artifact@v4
         with:
