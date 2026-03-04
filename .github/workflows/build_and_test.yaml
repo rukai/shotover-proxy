@@ -51,6 +51,10 @@ jobs:
           # downsides:
           # * PRs that update rust version or changes deps will be slow to iterate on due to changes not being cached.
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          # Additionally, the main builds should always run without cache to avoid accumulating unused build files across builds.
+          # Usually, this isnt a problem because rust-cache only caches dependencies, not our project.
+          # However, in this case we have enabled cache-all-crates, which forces rust-cache to cache our projects build files as well as the dependencies.
+          lookup-only: ${{ github.ref == 'refs/heads/main' }}
 
           # Our workspace contains crates like test-helpers that are only changed sometimes,
           # so enabling this gives a nice speedup at the cost of extra cache storage.
@@ -61,7 +65,7 @@ jobs:
       #
       # Note that: evicting this cache without evicting the rust-cache will lead to CI failures, however as long as our caches are well within the 10GB limit we should be fine.
       - name: Cache jassets
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: target/${{ matrix.profile }}/jassets
           # cache can be global as java assets work regardless of OS+arch
@@ -79,9 +83,7 @@ jobs:
         with:
           tool: nextest@0.9.129
       - name: Build tests
-        run: |
-          cargo nextest archive --archive-file nextest-${{ matrix.profile }}.tar.zst ${{ matrix.cargo_flags }} --all-features --all-targets
-          cargo test --doc ${{ matrix.cargo_flags }} --all-features
+        run: cargo nextest archive --archive-file nextest-${{ matrix.profile }}.tar.zst ${{ matrix.cargo_flags }} --all-features --all-targets
       - name: Upload built tests to workflow
         uses: actions/upload-artifact@v4
         with:

@@ -1,0 +1,55 @@
+name: cargo doc tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# Cancel already running jobs
+concurrency:
+  group: doc_tests_${{ github.head_ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build_check_and_upload:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Build Release
+            runner: ubuntu-24.04
+            cargo_flags: --release
+            profile: release
+
+          - name: Build Debug
+            runner: ubuntu-24.04
+            cargo_flags:
+            profile: debug
+
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      # We purposefully dont cache rust build here as build_and_test will always be the bottleneck
+      # so we should leave the cache alone so build_and_test can make more use of it.
+      - name: cache custom ubuntu packages
+        uses: actions/cache@v5
+        with:
+          path: shotover-proxy/build/packages
+          key: ubuntu-24.04-packages
+      - name: Install ubuntu packages
+        run: shotover-proxy/build/install_ubuntu_packages.sh
+      - name: run doc tests
+        run: |
+          cargo test --doc ${{ matrix.cargo_flags }} --all-features
+      - name: Ensure that tests did not create or modify any files that arent .gitignore'd
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git status
+            exit 1
+          fi
