@@ -43,3 +43,4 @@ Some possible commands are:
 * `ssh-instructions` - Print a bash snippet that can be used to ssh into the machine
 * `exit` - Exits the shell and terminates the EC2 instance.
 * `help` - Display all possible commands
+....
